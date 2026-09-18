@@ -49,9 +49,14 @@ type EncodeSpec struct {
 	TotalFrames int64
 	// Priority is applied to both child processes.
 	Priority proc.Priority
-	// StdinArgs supplies the encoder's input via a flag that names stdin, such
+	// StdinArg supplies the encoder's input via a flag that names stdin, such
 	// as "-" for x265. Required, because the input is a pipe.
 	StdinArg string
+	// InputArgs, when non-empty, replaces StdinArg. Use it for encoders whose
+	// input specification is more than one token, such as x264's
+	// "--demuxer y4m -". The output flag and path are appended after it either
+	// way.
+	InputArgs []string
 }
 
 // Parser extracts progress from one line of encoder output. Implementations are
@@ -334,9 +339,14 @@ func (b *Base) vspipeArgs() []string {
 }
 
 func (b *Base) encoderArgs() []string {
-	args := make([]string, 0, len(b.spec.EncoderArgs)+3)
+	input := b.spec.InputArgs
+	if len(input) == 0 {
+		input = []string{b.spec.StdinArg}
+	}
+	args := make([]string, 0, len(b.spec.EncoderArgs)+len(input)+2)
 	args = append(args, b.spec.EncoderArgs...)
-	args = append(args, b.spec.StdinArg, "-o", b.spec.Output)
+	args = append(args, input...)
+	args = append(args, "-o", b.spec.Output)
 	return args
 }
 
@@ -365,6 +375,10 @@ func (b *Base) encoderLineHandler() proc.LineFunc {
 // SetFatalLine installs a hook that inspects each encoder output line for
 // unrecoverable errors. Returning a non-nil error aborts the run.
 func (b *Base) SetFatalLine(fn func(string) error) { b.fatalLine = fn }
+
+// Spec returns the encoder specification this Base was built from. Encoders use
+// it in tests to assert the argument shape without starting a process.
+func (b *Base) Spec() EncodeSpec { return b.spec }
 
 // vspipeLineHandler surfaces Python exceptions raised by the script.
 func (b *Base) vspipeLineHandler() proc.LineFunc {

@@ -1,0 +1,7 @@
+Width: 1920
+Height: 1080
+Frames: 1000
+FPS: 30000/1001 (29.970 fps)
+Format Name: YUV420P10
+Color Family: YUV
+Bits: 10
