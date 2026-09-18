@@ -40,20 +40,53 @@ const (
 	ToolRPCChecker = "rpchecker"
 )
 
-// x265 build variants. Only win-x64 uses Asuna; every other target uses
-// upstream, because Asuna is pinned to the 3.5 (2021) baseline and therefore
-// has none of the ARM or RISC-V SIMD work (PLAN.md §2.0, TOOLS-REPO.md §3).
+// x265 build variants.
+//
+// Three builds exist so that a single profile can be run with whichever encoder
+// reproduces the desired behaviour:
+//
+//	VariantKyouko    AmusementClub's Kyouko, based on upstream 4.1. This is what
+//	                 the current .NET release actually ships, so it is the
+//	                 default on win-x64.
+//	VariantAsuna     the Yuuki-Asuna fork, frozen at the 3.5 (2021) baseline.
+//	                 Retained for output that was produced with it.
+//	VariantUpstream  the modern 4.x line, which carries the ARM NEON and RISC-V
+//	                 RVV work. The only choice off win-x64, because Asuna and
+//	                 Kyouko are x86-oriented.
 const (
+	VariantKyouko   = "kyouko"
 	VariantAsuna    = "asuna"
 	VariantUpstream = "upstream"
 )
 
-// X265Variant returns the x265 build to use on the given platform.
+// X265Variant returns the default x265 build for a platform.
 func X265Variant(goos, goarch string) string {
 	if goos == "windows" && goarch == "amd64" {
-		return VariantAsuna
+		return VariantKyouko
 	}
 	return VariantUpstream
+}
+
+// X265Variants returns every x265 build that may be present on a platform, in
+// order of preference. win-x64 carries all three; other targets only have the
+// upstream build.
+func X265Variants(goos, goarch string) []string {
+	if goos == "windows" && goarch == "amd64" {
+		return []string{VariantKyouko, VariantAsuna, VariantUpstream}
+	}
+	return []string{VariantUpstream}
+}
+
+// x265FileName maps a variant to its file name inside tools/x26x.
+func x265FileName(variant, exe string) string {
+	switch variant {
+	case VariantKyouko:
+		return "x265-kyouko" + exe
+	case VariantAsuna:
+		return "x265-asuna" + exe
+	default:
+		return "x265" + exe
+	}
 }
 
 // x264 build variants, following the same rule as x265: the tmod fork is
@@ -97,20 +130,32 @@ func defaultRelativePaths(goos, goarch string) map[string][]string {
 	if goos == "windows" {
 		exe = ".exe"
 	}
-	x265 := "x265" + exe
-	if X265Variant(goos, goarch) == VariantAsuna {
-		x265 = "x265-asuna" + exe
-	}
+	x265Default := x265FileName(X265Variant(goos, goarch), exe)
 	x264 := "x264" + exe
 	if X264Variant(goos, goarch) == VariantTMod {
 		x264 = "x264-tmod" + exe
 	}
+
+	// Every x265 variant that may exist is listed as a candidate, most
+	// preferred first. The toolchain records which one was found, so a caller
+	// can tell whether the build it asked for is actually present.
+	x265Candidates := make([]string, 0, 3)
+	x265Candidates = append(x265Candidates, "x26x/"+x265Default)
+	for _, v := range X265Variants(goos, goarch) {
+		name := "x26x/" + x265FileName(v, exe)
+		if name != "x26x/"+x265Default {
+			x265Candidates = append(x265Candidates, name)
+		}
+	}
+	// The legacy release shipped a plain x265.exe regardless of flavour.
+	x265Candidates = append(x265Candidates, "x26x/x265"+exe)
+
 	return map[string][]string{
 		// Candidates are tried in order; the first existing file wins. The
 		// extra names keep compatibility with the current release layout.
 		ToolVSPipe:     {"vapoursynth/vspipe" + exe, "vspipe" + exe},
 		ToolX264:       {"x26x/" + x264, "x26x/x264" + exe},
-		ToolX265:       {"x26x/" + x265, "x26x/x265" + exe},
+		ToolX265:       x265Candidates,
 		ToolSVTAV1:     {"svtav1/SvtAv1EncApp" + exe, "svtav1/svtav1" + exe},
 		ToolFFmpeg:     {"ffmpeg/ffmpeg" + exe, "ffmpeg" + exe},
 		ToolFFprobe:    {"ffmpeg/ffprobe" + exe, "ffprobe" + exe},
@@ -122,6 +167,20 @@ func defaultRelativePaths(goos, goarch string) map[string][]string {
 		ToolFlac:       {"flac/flac" + exe, "flac" + exe},
 		ToolTChapter:   {"tchapter/tchapter" + exe, "tchapter" + exe},
 		ToolRPCChecker: {"rpc/RPChecker" + exe, "rpc/rpchecker" + exe},
+	}
+}
+
+// variantFromPath recovers the x265 variant from the file that was found, so
+// Capabilities reports what is really installed rather than what was hoped for.
+func variantFromPath(path string) string {
+	base := filepath.Base(path)
+	switch {
+	case strings.Contains(base, "-kyouko"):
+		return VariantKyouko
+	case strings.Contains(base, "-asuna"):
+		return VariantAsuna
+	default:
+		return VariantUpstream
 	}
 }
 
@@ -167,7 +226,9 @@ func Discover(opts Options) (node.Capabilities, error) {
 		info := node.ToolInfo{Path: path}
 		switch name {
 		case ToolX265:
-			info.Variant = X265Variant(caps.OS, caps.Arch)
+			// Report the variant that was actually found, not the preferred
+			// one, so a partially populated tools tree is visible.
+			info.Variant = variantFromPath(path)
 		case ToolX264:
 			info.Variant = X264Variant(caps.OS, caps.Arch)
 		}

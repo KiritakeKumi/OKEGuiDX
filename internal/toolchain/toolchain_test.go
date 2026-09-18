@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/node"
@@ -11,13 +12,13 @@ import (
 
 func TestX265VariantSelection(t *testing.T) {
 	t.Parallel()
-	// The rule from PLAN.md §2.0: only win-x64 uses the Asuna build, because
-	// Asuna is pinned to the 2021 baseline and has no ARM or RISC-V SIMD.
+	// win-x64 defaults to the Kyouko build, because that is what the current
+	// .NET release ships and therefore what reproduces existing output.
 	cases := []struct {
 		goos, goarch string
 		want         string
 	}{
-		{"windows", "amd64", VariantAsuna},
+		{"windows", "amd64", VariantKyouko},
 		{"windows", "arm64", VariantUpstream},
 		{"linux", "amd64", VariantUpstream},
 		{"linux", "arm64", VariantUpstream},
@@ -30,6 +31,118 @@ func TestX265VariantSelection(t *testing.T) {
 				t.Errorf("X265Variant(%s, %s) = %q, want %q", tc.goos, tc.goarch, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestX265VariantsListsEveryBuild(t *testing.T) {
+	t.Parallel()
+	// win-x64 ships all three builds so the operator can pick the one that
+	// reproduces the behaviour they want.
+	got := X265Variants("windows", "amd64")
+	if len(got) != 3 {
+		t.Fatalf("X265Variants(win-x64) = %v, want 3 entries", got)
+	}
+	if got[0] != VariantKyouko {
+		t.Errorf("first preference = %q, want %q", got[0], VariantKyouko)
+	}
+	want := map[string]bool{VariantKyouko: true, VariantAsuna: true, VariantUpstream: true}
+	for _, v := range got {
+		if !want[v] {
+			t.Errorf("unexpected variant %q", v)
+		}
+		delete(want, v)
+	}
+	if len(want) != 0 {
+		t.Errorf("missing variants: %v", want)
+	}
+
+	// Every other target has exactly one build, because Asuna and Kyouko are
+	// x86-oriented and carry none of the ARM or RISC-V SIMD work.
+	for _, tc := range []struct{ goos, goarch string }{
+		{"linux", "amd64"}, {"linux", "arm64"}, {"linux", "riscv64"}, {"windows", "arm64"},
+	} {
+		if got := X265Variants(tc.goos, tc.goarch); len(got) != 1 || got[0] != VariantUpstream {
+			t.Errorf("X265Variants(%s, %s) = %v, want [upstream]", tc.goos, tc.goarch, got)
+		}
+	}
+}
+
+func TestX265FileNamePerVariant(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		variant string
+		exe     string
+		want    string
+	}{
+		{VariantKyouko, "", "x265-kyouko"},
+		{VariantAsuna, "", "x265-asuna"},
+		{VariantUpstream, "", "x265"},
+		{VariantKyouko, ".exe", "x265-kyouko.exe"},
+	}
+	for _, tc := range cases {
+		if got := x265FileName(tc.variant, tc.exe); got != tc.want {
+			t.Errorf("x265FileName(%q, %q) = %q, want %q", tc.variant, tc.exe, got, tc.want)
+		}
+	}
+}
+
+func TestVariantFromPathRecoversVariant(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		`C:\tools\x26x\x265-kyouko.exe`: VariantKyouko,
+		`C:\tools\x26x\x265-asuna.exe`:  VariantAsuna,
+		`C:\tools\x26x\x265.exe`:        VariantUpstream,
+		`/usr/local/bin/x265`:           VariantUpstream,
+	}
+	for path, want := range cases {
+		if got := variantFromPath(path); got != want {
+			t.Errorf("variantFromPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestDiscoverPrefersKyoukoOnWindowsX64(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("the three-way x265 layout only exists on win-x64")
+	}
+	// When several builds are present, the Kyouko one must win, because it is
+	// what reproduces the current release's output.
+	root := buildToolsTree(t, "x26x/x265", "x26x/x265-asuna", "x26x/x265-kyouko")
+	caps, err := Discover(Options{Root: root, SkipProbe: true})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	info, ok := caps.Tool(ToolX265)
+	if !ok {
+		t.Fatal("x265 was not discovered")
+	}
+	if info.Variant != VariantKyouko {
+		t.Errorf("Variant = %q, want %q", info.Variant, VariantKyouko)
+	}
+	if !strings.Contains(info.Path, "kyouko") {
+		t.Errorf("Path = %q, want the Kyouko build", info.Path)
+	}
+}
+
+func TestDiscoverFallsBackWhenKyoukoAbsent(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("the three-way x265 layout only exists on win-x64")
+	}
+	// A tree that only has the Asuna build must still resolve, reporting the
+	// variant it actually found rather than the one it preferred.
+	root := buildToolsTree(t, "x26x/x265-asuna")
+	caps, err := Discover(Options{Root: root, SkipProbe: true})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	info, ok := caps.Tool(ToolX265)
+	if !ok {
+		t.Fatal("x265 was not discovered")
+	}
+	if info.Variant != VariantAsuna {
+		t.Errorf("Variant = %q, want %q", info.Variant, VariantAsuna)
 	}
 }
 
