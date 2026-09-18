@@ -126,13 +126,3 @@ tc_status tc_xmlchapters_parse_mem(const void *buf, size_t len, const char *hint
     (void)d;
     return tc_not_implemented(TC_FMT_XML);
 }
-
-/* --- B12: XPL playlist --------------------------------------------------- */
-
-tc_status tc_xpl_parse_mem(const void *buf, size_t len, const char *hint, tc_data *d) {
-    (void)buf;
-    (void)len;
-    (void)hint;
-    (void)d;
-    return tc_not_implemented(TC_FMT_XPL);
-}

@@ -171,6 +171,7 @@ tc_status tc_vtt_parse_mem(const void *buf, size_t len, const char *hint, tc_dat
 tc_status tc_xmlchapters_parse_mem(const void *buf, size_t len, const char *hint, tc_data *d);
 
 /* B12: XPL playlist */
+tc_status tc_xpl_parse_file(const char *path, tc_data *d);
 tc_status tc_xpl_parse_mem(const void *buf, size_t len, const char *hint, tc_data *d);
 
 /* Reports that a parser has not been written yet. */

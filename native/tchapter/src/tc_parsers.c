@@ -25,7 +25,7 @@ static const tc_parser g_parsers[] = {
     {TC_FMT_OGM,  "ogm",  NULL, tc_ogm_parse_mem},
     {TC_FMT_VTT,  "vtt",  NULL, tc_vtt_parse_mem},
     {TC_FMT_XML,  "xml",  NULL, tc_xmlchapters_parse_mem},
-    {TC_FMT_XPL,  "xpl",  NULL, tc_xpl_parse_mem},
+    {TC_FMT_XPL,  "xpl",  tc_xpl_parse_file, tc_xpl_parse_mem},
     {TC_FMT_MATROSKA_XML, "matroska", NULL, tc_matroska_parse_mem},
     {TC_FMT_CUE,  "cue",  tc_cue_parse_file, tc_cue_parse_mem},
     {TC_FMT_MPLS, "mpls", tc_mpls_parse_file, tc_mpls_parse_mem},
