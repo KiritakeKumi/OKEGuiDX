@@ -134,29 +134,6 @@ tc_format tc_detect_from_file(const char *path) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Parser registry                                                    */
-/* ------------------------------------------------------------------ */
-
-const tc_parser *tc_parsers(void) {
-    /* Populated as the parser packages land (WORKSTREAMS.md §2 B2..B13).
-     * Keeping the table here means the dispatcher never has to change. */
-    static const tc_parser table[] = {
-        {TC_FMT_AUTO, NULL, NULL, NULL},
-    };
-    return table;
-}
-
-const tc_parser *tc_parser_for(tc_format fmt) {
-    const tc_parser *p = tc_parsers();
-    for (; p->format != TC_FMT_AUTO || p->name != NULL; p++) {
-        if (p->format == fmt) {
-            return p;
-        }
-    }
-    return NULL;
-}
-
-/* ------------------------------------------------------------------ */
 /* Public entry points                                                */
 /* ------------------------------------------------------------------ */
 

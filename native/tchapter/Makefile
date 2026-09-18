@@ -19,8 +19,14 @@ SRCDIR   := src
 OBJDIR   := build
 INCDIR   := include
 
-SRCS := $(wildcard $(SRCDIR)/*.c)
-OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(SRCS))
+# Parser implementations live in src/parsers/ so that each parser package adds
+# exactly one file and the source list never has to be edited by hand.
+SRCS := $(wildcard $(SRCDIR)/*.c) $(wildcard $(SRCDIR)/parsers/*.c)
+# The test runner has its own main(); it is linked into the test binary only.
+LIB_SRCS := $(filter-out $(SRCDIR)/tc_test_main.c,$(SRCS))
+LIB_OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(LIB_SRCS))
+TEST_SRCS := $(wildcard $(SRCDIR)/tc_test_main.c) $(wildcard $(SRCDIR)/tc_test_*.c)
+TEST_OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(TEST_SRCS))
 
 LIB_STATIC := $(OBJDIR)/libtchapter.a
 
@@ -48,13 +54,16 @@ shared: $(LIB_SHARED)
 $(OBJDIR):
 	@mkdir -p $(OBJDIR)
 
+# Parser sources live one level deeper, so the object directory has to mirror
+# that. The order-only prerequisite on the parent directory keeps -j safe.
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
+	@mkdir -p $(dir $@)
 	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) -c $< -o $@
 
-$(LIB_STATIC): $(OBJS)
+$(LIB_STATIC): $(LIB_OBJS)
 	$(AR) rcs $@ $^
 
-$(LIB_SHARED): $(OBJS)
+$(LIB_SHARED): $(LIB_OBJS)
 	$(CC) -shared -o $@ $^
 
 # The CLI is what the Go engine uses by default: a sidecar process keeps the Go
@@ -65,14 +74,14 @@ $(OBJDIR)/tchapter: $(SRCDIR)/tc_cli.c $(LIB_STATIC) | $(OBJDIR)
 	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $< $(LIB_STATIC) -o $@
 
 test: $(OBJDIR)/tc_test
-	$(OBJDIR)/tc_test
+	cd . && $(OBJDIR)/tc_test
 
-$(OBJDIR)/tc_test: $(SRCDIR)/tc_test.c $(LIB_STATIC) | $(OBJDIR)
-	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $< $(LIB_STATIC) -o $@
+$(OBJDIR)/tc_test: $(TEST_OBJS) $(LIB_STATIC) | $(OBJDIR)
+	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $(TEST_OBJS) $(LIB_STATIC) -o $@
 
 # clang-format is the single formatter for C sources in this repository.
 fmt:
-	clang-format -i $(SRCDIR)/*.c $(SRCDIR)/*.h $(INCDIR)/*.h
+	clang-format -i $(SRCDIR)/*.c $(SRCDIR)/*.h $(SRCDIR)/parsers/*.c $(INCDIR)/*.h
 
 clean:
 	rm -rf $(OBJDIR)
