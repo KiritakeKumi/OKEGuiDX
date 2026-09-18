@@ -1,0 +1,112 @@
+name: Go
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  build:
+    name: build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify modules are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build all five targets
+        # The engine is pure Go on purpose: cgo would cost cross-compilation for
+        # every target, including riscv64 (PLAN.md §3).
+        run: |
+          set -e
+          for target in \
+            "windows/amd64" \
+            "windows/arm64" \
+            "linux/amd64" \
+            "linux/arm64" \
+            "linux/riscv64"
+          do
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 \
+              go build ./... && echo "built $target"
+          done
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+
+  tchapter:
+    name: libtchapter (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            cc: gcc
+          - target: linux-arm64
+            cc: aarch64-linux-gnu-gcc
+          - target: linux-riscv64
+            cc: riscv64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cross toolchains
+        if: matrix.cc != 'gcc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu
+
+      - name: Build and test
+        working-directory: native/tchapter
+        run: |
+          set -e
+          mkdir -p build
+          # The library has no dependencies beyond libc, so a cross build is
+          # just a different CC. Tests only run on the host architecture.
+          if [ "${{ matrix.cc }}" = "gcc" ]; then
+            make test
+          else
+            make static shared CC=${{ matrix.cc }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libtchapter-${{ matrix.target }}
+          path: |
+            native/tchapter/build/libtchapter.*

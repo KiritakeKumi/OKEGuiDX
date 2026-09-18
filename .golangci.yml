@@ -1,0 +1,51 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - nolintlint
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Test fixtures deliberately contain malformed input.
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+          - gocritic
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

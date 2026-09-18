@@ -249,3 +249,17 @@ dist/windows/tools/
 
 # Visual Studio Code config files
 .vscode/
+
+# ---------------------------------------------------------------------------
+# OKEGuiDX rewrite (Go engine + libtchapter)
+# ---------------------------------------------------------------------------
+
+# Go build output
+/okegui
+/okeguidx
+/okegui-desktop
+*.test
+
+# libtchapter
+native/tchapter/build/
+native/tchapter/out.txt

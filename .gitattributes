@@ -64,3 +64,17 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+###############################################################################
+# OKEGuiDX rewrite
+###############################################################################
+
+# Shell scripts run on Linux runners; force LF so a Windows checkout cannot
+# introduce CRLF into a script that is later executed by bash.
+*.sh    text eol=lf
+Makefile text eol=lf
+
+# Go and C sources: normalise to LF in the repository.
+*.go    text eol=lf
+*.c     text eol=lf
+*.h     text eol=lf
