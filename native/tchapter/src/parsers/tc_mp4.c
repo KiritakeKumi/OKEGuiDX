@@ -255,22 +255,27 @@ static void mp4_utf16_decode(const uint8_t *s, size_t len, int big_endian,
         mp4_put_utf8(out, u);
     }
     if (i < len) {
-        mp4_put_utf8(out, MP4_REPLACEMENT); /* odd trailing byte */
+        /* The reference decodes a fixed 1024-byte buffer, so an odd trailing
+         * byte is paired with the NUL terminator that follows it. */
+        uint32_t u = big_endian ? (uint32_t)s[i] << 8 : (uint32_t)s[i];
+        mp4_put_utf8(out, u);
     }
 }
 
 /* Decodes a chapter title the way MP4Parser.GetString does: a byte order mark
  * selects UTF-16 or UTF-8, anything else is UTF-8, and the text ends at the
- * first NUL. The mark itself is not part of the name (the reference's UTF-16
- * branch decodes it into a leading U+FEFF; no real writer emits UTF-16 here,
- * and the UTF-8 branch strips its mark, so stripping is used for both). */
+ * first NUL.
+ *
+ * The reference's UTF-8 branch skips the three mark bytes, but its UTF-16
+ * branches decode the mark as a leading U+FEFF (Encoding.Unicode does not
+ * strip it). That asymmetry is reproduced here. */
 static char *mp4_decode_title(const uint8_t *s, size_t len) {
     tc_buf out;
     tc_buf_init(&out);
     if (len >= 2 && s[0] == 0xFF && s[1] == 0xFE) {
-        mp4_utf16_decode(s + 2, len - 2, 0, &out);
+        mp4_utf16_decode(s, len, 0, &out);
     } else if (len >= 2 && s[0] == 0xFE && s[1] == 0xFF) {
-        mp4_utf16_decode(s + 2, len - 2, 1, &out);
+        mp4_utf16_decode(s, len, 1, &out);
     } else if (len >= 3 && s[0] == 0xEF && s[1] == 0xBB && s[2] == 0xBF) {
         mp4_utf8_decode(s + 3, len - 3, &out);
     } else {
@@ -317,6 +322,17 @@ static uint64_t mp4_ms_from(uint64_t t, uint32_t scale) {
     }
     double d = 1000.0 * (double)t / (double)scale;
     return (uint64_t)(d + 0.5);
+}
+
+/* The largest chapter time that still converts to nanoseconds without signed
+ * overflow. A hostile box can claim any 64-bit start time; the chapter clock is
+ * bounded by this instead of wrapping. */
+#define MP4_MAX_MS (INT64_MAX / 1000000LL)
+
+/* Millisecond value of `t`, clamped to the representable chapter range. */
+static int64_t mp4_ms_clamped(uint64_t t, uint32_t scale) {
+    uint64_t ms = mp4_ms_from(t, scale);
+    return ms > (uint64_t)MP4_MAX_MS ? MP4_MAX_MS : (int64_t)ms;
 }
 
 /* ------------------------------------------------------------------ */
@@ -642,6 +658,36 @@ static tc_status mp4_qt_read(const mp4_view *f, mp4_box trak,
     }
     size_t chunk_off = stco.start + 8;
 
+    /* The sample tables must be able to account for every sample: mp4v2
+     * throws "sample id out of range" when stts or stsc runs out mid-track,
+     * which the caller turns into "no QuickTime chapters". The chunk table
+     * also bounds the sample count, so a bogus stsz cannot force a huge
+     * allocation. */
+    {
+        uint64_t stts_total = 0;
+        for (uint32_t i = 0; i < stts_n; i++) {
+            stts_total += tc_be32(f->data + stts_off + (size_t)i * 8);
+        }
+        if (sample_count > stts_total) {
+            return TC_OK;
+        }
+        uint64_t chunk_total = 0;
+        for (uint32_t i = 0; i < stsc_n; i++) {
+            uint32_t first = tc_be32(f->data + stsc_off + (size_t)i * 12);
+            uint32_t last = i + 1 < stsc_n
+                                ? tc_be32(f->data + stsc_off + (size_t)(i + 1) * 12)
+                                : chunk_count + 1;
+            uint32_t per = tc_be32(f->data + stsc_off + (size_t)i * 12 + 4);
+            if (first < 1 || last <= first) {
+                return TC_OK;
+            }
+            chunk_total += (uint64_t)(last - first) * per;
+        }
+        if (sample_count > chunk_total) {
+            return TC_OK;
+        }
+    }
+
     mp4_qt_chapter *list = tc_calloc(sample_count, sizeof(*list));
     if (!list) {
         return TC_E_NOMEM;
@@ -744,7 +790,7 @@ static tc_status mp4_qt_read(const mp4_view *f, mp4_box trak,
             return TC_E_NOMEM;
         }
         list[made].name = name;
-        list[made].duration_ms = (int64_t)mp4_ms_from(delta, timescale);
+        list[made].duration_ms = mp4_ms_clamped(delta, timescale);
         made++;
     }
 
@@ -797,7 +843,8 @@ static tc_status mp4_fallback_entry(const mp4_view *f, mp4_box moov,
     }
     double millis = (double)duration * 1000.0 / (double)timescale;
     millis = millis >= 0.0 ? millis + 0.5 : millis - 0.5;
-    int64_t ns = (int64_t)millis * 1000000LL;
+    int64_t ms = millis > (double)MP4_MAX_MS ? MP4_MAX_MS : (int64_t)millis;
+    int64_t ns = ms * 1000000LL;
 
     tc_entry *e = tc_data_add_entry(d);
     if (!e) {
@@ -942,18 +989,18 @@ static tc_status mp4_parse(const uint8_t *data, size_t len, tc_data *d) {
 
                     /* A duration is the gap to the next start time; the last
                      * chapter runs to the movie duration
-                     * (MP4File::GetChapters). */
+                     * (MP4File::GetChapters). The times are clamped so a
+                     * hostile start time cannot overflow the chapter clock. */
                     int64_t movie_ms = 0;
                     if (have_movie && movie_timescale != 0) {
-                        movie_ms = (int64_t)mp4_ms_from(movie_duration,
-                                                        movie_timescale);
+                        movie_ms = mp4_ms_clamped(movie_duration, movie_timescale);
                     }
                     int64_t sum_ms = 0;
                     for (size_t i = 0; i < count; i++) {
                         int64_t next_ms =
                             i + 1 < count
-                                ? (int64_t)mp4_ms_from(entries[i + 1].start,
-                                                       (uint32_t)scale)
+                                ? mp4_ms_clamped(entries[i + 1].start,
+                                                 (uint32_t)scale)
                                 : movie_ms;
                         names[i] = entries[i].name;
                         entries[i].name = NULL;

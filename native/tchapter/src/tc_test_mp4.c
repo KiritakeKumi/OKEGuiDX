@@ -569,7 +569,10 @@ static void test_nero_v0_timescale(void) {
     cleanup(&b, d);
 }
 
-/* A byte order mark selects UTF-16 or is stripped from UTF-8. */
+/* A byte order mark selects UTF-16 or is stripped from UTF-8, matching
+ * MP4Parser.GetString. The reference's UTF-16 branch decodes the mark as a
+ * leading U+FEFF (Encoding.Unicode does not strip it), while its UTF-8 branch
+ * skips the three mark bytes, so the two cases are asserted differently. */
 static void test_nero_title_encodings(void) {
     tc_buf b;
     tc_buf_init(&b);
@@ -610,8 +613,8 @@ static void test_nero_title_encodings(void) {
     }
     TC_CHECK_EQ_INT(tc_chapter_count(d, 0), 3);
     check_chapter(d, 0, 0, 0, "hello");
-    check_chapter(d, 0, 1, 1000000000LL, "hi");
-    check_chapter(d, 0, 2, 2000000000LL, "hi");
+    check_chapter(d, 0, 1, 1000000000LL, "\xEF\xBB\xBFhi");
+    check_chapter(d, 0, 2, 2000000000LL, "\xEF\xBB\xBFhi");
     cleanup(&b, d);
 }
 
@@ -869,6 +872,74 @@ static void test_no_moov(void) {
     cleanup(&b, d);
 }
 
+/* A box with size 0 runs to the end of its enclosing range. Here the mdat uses
+ * it, which must not stop the moov that precedes it from being read. */
+static void test_zero_size_box(void) {
+    const nero_chapter chapters[] = {{0, "Only"}};
+    tc_buf plain;
+    build_nero_file(&plain, 1000, 5000, chapters, 1, 1);
+
+    size_t mdat_at = find_top_box(&plain, "mdat");
+    TC_CHECK(mdat_at != 0);
+    if (mdat_at == 0) {
+        tc_buf_free(&plain);
+        return;
+    }
+    /* Rewrite the mdat size as 0: it now extends to the end of the file. */
+    patch_be32(plain.data + mdat_at, 0);
+
+    tc_data *d = NULL;
+    tc_status st = write_and_parse(&plain, &d);
+    TC_CHECK_EQ_INT(st, TC_OK);
+    if (st != TC_OK) {
+        fprintf(stderr, "  parse error: %s\n", tc_last_error());
+        cleanup(&plain, d);
+        return;
+    }
+    TC_CHECK_EQ_INT(tc_chapter_count(d, 0), 1);
+    check_chapter(d, 0, 0, 0, "Only");
+    cleanup(&plain, d);
+}
+
+/* A hostile start time must not overflow the chapter clock. */
+static void test_huge_chapter_time(void) {
+    tc_buf b;
+    tc_buf_init(&b);
+    put_ftyp(&b);
+    size_t moov = box_open(&b, "moov");
+    put_mvhd(&b, 1000, 10000);
+    size_t udta = box_open(&b, "udta");
+    size_t chpl = box_open(&b, "chpl");
+    put_full_box_v1(&b);
+    tc_buf_putc(&b, 0);
+    put_be32(&b, 2);
+    put_be64(&b, 0);
+    tc_buf_putc(&b, 1);
+    tc_buf_putc(&b, 'A');
+    put_be64(&b, 0xffffffffffffffffULL); /* far beyond any real time */
+    tc_buf_putc(&b, 1);
+    tc_buf_putc(&b, 'B');
+    box_close(&b, chpl);
+    box_close(&b, udta);
+    box_close(&b, moov);
+
+    tc_data *d = NULL;
+    tc_status st = write_and_parse(&b, &d);
+    TC_CHECK_EQ_INT(st, TC_OK);
+    if (st != TC_OK) {
+        fprintf(stderr, "  parse error: %s\n", tc_last_error());
+        cleanup(&b, d);
+        return;
+    }
+    /* The times saturate instead of wrapping negative. */
+    tc_chapter_t c;
+    TC_CHECK_EQ_INT(tc_chapter_at(d, 0, 0, &c), TC_OK);
+    TC_CHECK(c.time_ns >= 0);
+    TC_CHECK_EQ_INT(tc_chapter_at(d, 0, 1, &c), TC_OK);
+    TC_CHECK(c.time_ns >= 0);
+    cleanup(&b, d);
+}
+
 static void test_invalid_box_size(void) {
     /* A size below the 8-byte header is malformed. */
     tc_buf b;
@@ -935,6 +1006,8 @@ TC_SUITE(mp4) {
     TC_CASE("truncated_chpl");        test_truncated_chpl_title();
     TC_CASE("chpl_count_range");      test_chpl_count_out_of_range();
     TC_CASE("chpl_v0_count_range");   test_chpl_v0_count_out_of_range();
+    TC_CASE("zero_size_box");         test_zero_size_box();
+    TC_CASE("huge_chapter_time");     test_huge_chapter_time();
     TC_CASE("no_moov");               test_no_moov();
     TC_CASE("invalid_box_size");      test_invalid_box_size();
     TC_CASE("not_mp4");               test_not_an_mp4_file();
