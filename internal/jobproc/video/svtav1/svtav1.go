@@ -22,6 +22,7 @@
 package svtav1
 
 import (
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -44,7 +45,10 @@ const Name = "svtav1"
 // writing and aborts with "Error: Invalid parameter '-o' with value '...'".
 // The null device keeps the flag harmless, and the bitstream is byte-identical
 // to a run without it (verified against SvtAv1EncApp v4.2.0).
-const ReconOutput = "NUL"
+//
+// os.DevNull is "NUL" on Windows and "/dev/null" elsewhere, so the same code
+// serves every target.
+var ReconOutput = os.DevNull
 
 // Progress patterns.
 //

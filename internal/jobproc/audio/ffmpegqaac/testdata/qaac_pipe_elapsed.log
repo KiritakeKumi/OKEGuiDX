@@ -1,0 +1,7 @@
+qaac 2.44, CoreAudioToolbox 7.9.9.3
+stdin.aac
+4:46.511 (45.3x)
+4:49.297 (45.2x)
+12758016/-1 samples processed in 0:06.395
+Overall bitrate: 110.335kbps
+ERROR: Cannot seek back the input

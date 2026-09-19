@@ -1,0 +1,4 @@
+TITLE "x"
+FILE "a.wav" WAVE
+  TRACK 01 AUDIO
+    INDEX 02 00:00:00

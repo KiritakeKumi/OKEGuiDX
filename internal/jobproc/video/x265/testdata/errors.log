@@ -1,0 +1,5 @@
+x265 [info]: HEVC encoder version 4.1+1-1a9d0ba7e
+x265 [error]: Unable to open input file <->, error 2
+x265 [error]: failed to open input file
+unknown option --not-a-real-option
+Error: fwrite() call failed when writing frame: 120, plane 0, errno: 28

@@ -440,12 +440,14 @@ func (p *Processor) parseRPCOUT(line string) error {
 }
 
 // fail records the first parse failure. The legacy code threw out of the line
-// handler, which the process layer turns into a read error; recording it and
-// letting the run finish keeps the child from being killed mid-write.
+// handler, which surfaced as a task error; recording it and letting the run
+// finish keeps the child from being killed mid-write while producing the same
+// outcome.
 func (p *Processor) fail(err error) {
 	p.mu.Lock()
 	if p.frameErr == nil {
 		p.frameErr = err
+		p.status = model.RPCError
 	}
 	p.mu.Unlock()
 }

@@ -1123,6 +1123,31 @@ static void test_play_item_without_primary_video_fails(void) {
     TC_CHECK(d == NULL);
 }
 
+static void test_frame_rate_index_out_of_table_fails(void) {
+    /* Config.FRAME_RATE has eight entries, so a video info nibble of 8..15
+     * makes the original throw IndexOutOfRangeException. The port reports a
+     * format error instead of silently using a wrong frame rate. */
+    const char *names[1] = {"00001"};
+    uint32_t times[1][2] = {{0, 45000}};
+    for (uint8_t nibble = 8; nibble < 16; nibble++) {
+        uint8_t rates[1] = {nibble};
+        size_t body_len = 0;
+        uint8_t *body = build_playlist_body(&body_len, 1, names, times, rates);
+        size_t total = 0;
+        uint8_t *data = build_playlist(&total, "0200", body, body_len, NULL, 0, NULL, 0);
+        free(body);
+
+        tc_data *d = NULL;
+        tc_status st = tc_parse_mem(data, total, TC_FMT_MPLS, "t.mpls", &d);
+        free(data);
+        TC_CHECK(st != TC_OK);
+        TC_CHECK(d == NULL);
+        if (d) {
+            tc_free(d);
+        }
+    }
+}
+
 static void test_rejects_bad_arguments(void) {
     tc_data *d = NULL;
     TC_CHECK_EQ_INT(tc_parse_file("/definitely/not/here.mpls", TC_FMT_MPLS, &d), TC_E_IO);
@@ -1156,5 +1181,6 @@ TC_SUITE(mpls) {
     TC_CASE("bad_magic_version");     test_rejects_bad_magic_and_version();
     TC_CASE("bad_offsets");           test_rejects_offsets_past_end();
     TC_CASE("no_primary_video");      test_play_item_without_primary_video_fails();
+    TC_CASE("fps_out_of_table");      test_frame_rate_index_out_of_table_fails();
     TC_CASE("bad_arguments");         test_rejects_bad_arguments();
 }

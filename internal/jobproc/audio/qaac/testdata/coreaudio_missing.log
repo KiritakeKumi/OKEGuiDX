@@ -1,0 +1,5 @@
+qaac 2.85, CoreAudioToolbox 7.10.9.0
+Q:\work\ep03.flac
+AAC-LC Encoder, TVBR q100, Quality 96
+[43.7%] 0:10.760/0:24.619 (18.3x), ETA 0:00.000
+ERROR: CoreAudioToolbox.dll: 由于找不到指定的模块，应用程序未能启动。

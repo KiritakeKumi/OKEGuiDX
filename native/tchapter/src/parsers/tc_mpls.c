@@ -612,17 +612,25 @@ static tc_status mpls_parse_header(mpls_reader *r, uint32_t *playlist_start,
 /* ------------------------------------------------------------------ */
 
 /* Config.FRAME_RATE from Config.cs, as an exact rational. Indices 0 and 5 are
- * "reserved" and map to zero. */
-static void mpls_set_fps(tc_entry *e, int32_t index) {
+ * "reserved" and map to zero. The C# table has exactly eight entries, so a
+ * nibble outside 0..7 makes the original throw IndexOutOfRangeException; the
+ * port reports TC_E_FORMAT instead of silently inventing a frame rate. */
+static tc_status mpls_set_fps(tc_entry *e, int32_t index) {
     switch (index) {
+    case 0:  e->fps_num = 0;     e->fps_den = 1;    break;
     case 1:  e->fps_num = 24000; e->fps_den = 1001; break;
     case 2:  e->fps_num = 24;    e->fps_den = 1;    break;
     case 3:  e->fps_num = 25;    e->fps_den = 1;    break;
     case 4:  e->fps_num = 30000; e->fps_den = 1001; break;
+    case 5:  e->fps_num = 0;     e->fps_den = 1;    break;
     case 6:  e->fps_num = 50;    e->fps_den = 1;    break;
     case 7:  e->fps_num = 60000; e->fps_den = 1001; break;
-    default: e->fps_num = 0;     e->fps_den = 1;    break;
+    default:
+        return tc_fail(TC_E_FORMAT,
+                       "mpls: frame rate index %ld is outside the 0..7 table",
+                       (long)index);
     }
+    return TC_OK;
 }
 
 static tc_status mpls_build_entries(const mpls_play_item *items, size_t item_count,
@@ -645,9 +653,11 @@ static tc_status mpls_build_entries(const mpls_play_item *items, size_t item_cou
         if (!e->source || !e->title) {
             return TC_E_NOMEM;
         }
-        mpls_set_fps(e, pi->frame_rate);
+        tc_status fps_st = mpls_set_fps(e, pi->frame_rate);
+        if (fps_st != TC_OK) {
+            return fps_st;
+        }
         e->duration_ns = mpls_pts_to_ns(pi->out_time - pi->in_time);
-
         /* The original filters marks by type and play item reference; the
          * first match fixes the offset, which is the IN time when that is
          * earlier than the first mark. */

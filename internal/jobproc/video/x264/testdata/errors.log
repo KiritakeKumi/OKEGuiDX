@@ -1,0 +1,4 @@
+x264 [error]: malloc of size 8388608 failed
+x264 [error]: x264_encoder_open failed
+unknown option --not-a-real-option
+Error: fwrite() call failed when writing frame: 120, plane 0, errno: 28

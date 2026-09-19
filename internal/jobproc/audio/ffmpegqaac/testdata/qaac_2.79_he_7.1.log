@@ -1,0 +1,10 @@
+qaac 2.79, CoreAudioToolbox 7.10.9.0
+
+Test.m4a
+Format: int24 -> float32
+Output layout: 7.1 (C L R Ls Rs Rls Rrs LFE)
+AAC-HE Encoder, CVBR 224kbps, Quality 96
+[100.0%] 0:49.055/0:49.055 (12.1x), ETA 0:00.000
+4709376/4709376 samples processed in 0:04.046
+Overall bitrate: 223.677kbps
+Optimizing...done

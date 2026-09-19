@@ -1,0 +1,37 @@
+ffmpeg version 2022-05-26-git-0dcbe1c1aa-full_build-www.gyan.dev Copyright (c) 2000-2022 the FFmpeg developers
+Input #0, flac, from 'normal.flac':
+  Metadata:
+    encoder         : Lavf59.24.100
+  Duration: 00:00:02.00, start: 0.000000, bitrate: 133 kb/s
+  Stream #0:0: Audio: flac, 44100 Hz, mono, s16
+Stream mapping:
+  Stream #0:0 -> #0:0 (flac (native) -> pcm_s16le (native))
+Press [q] to stop, [?] for help
+Output #0, null, to '/dev/null':
+  Metadata:
+    encoder         : Lavf59.24.100
+  Stream #0:0: Audio: pcm_s16le, 44100 Hz, mono, s16, 705 kb/s
+    Metadata:
+      encoder         : Lavc59.32.100 pcm_s16le
+size=N/A time=00:00:00.10 bitrate=N/A speed= 229x    
+size=N/A time=00:00:02.00 bitrate=N/A speed= 317x    
+video:0kB audio:172kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: unknown
+[Parsed_astats_0 @ 0000021f3402dc80] Overall
+[Parsed_astats_0 @ 0000021f3402dc80] DC offset: 0.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Min level: -4095.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Max level: 4095.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Min difference: 2.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Max difference: 584.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Mean difference: 371.126872
+[Parsed_astats_0 @ 0000021f3402dc80] RMS difference: 412.213756
+[Parsed_astats_0 @ 0000021f3402dc80] Peak level dB: -18.063656
+[Parsed_astats_0 @ 0000021f3402dc80] RMS level dB: -21.073717
+[Parsed_astats_0 @ 0000021f3402dc80] RMS peak dB: -21.066779
+[Parsed_astats_0 @ 0000021f3402dc80] RMS trough dB: -23.071085
+[Parsed_astats_0 @ 0000021f3402dc80] Flat factor: 0.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Peak count: 800.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Noise floor dB: -18.060739
+[Parsed_astats_0 @ 0000021f3402dc80] Noise floor count: 85996.000000
+[Parsed_astats_0 @ 0000021f3402dc80] Entropy: 0.601921
+[Parsed_astats_0 @ 0000021f3402dc80] Bit depth: 16/16
+[Parsed_astats_0 @ 0000021f3402dc80] Number of samples: 88200

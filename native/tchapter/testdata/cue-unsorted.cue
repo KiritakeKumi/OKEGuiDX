@@ -1,0 +1,10 @@
+FILE "a.wav" WAVE
+  TRACK 03 AUDIO
+    TITLE "third"
+    INDEX 01 00:20:00
+  TRACK 01 AUDIO
+    TITLE "first"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "second"
+    INDEX 01 00:10:00

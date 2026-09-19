@@ -70,10 +70,43 @@ static vtt_line vtt_next_line(const char **cursor, const char *end) {
 /* Time codes                                                         */
 /* ------------------------------------------------------------------ */
 
-/* Parses one "-->"-separated field of a cue time line. The field is a slice of
- * the text buffer rather than a C string, so it is copied into a scratch buffer
- * before tc_parse_timestamp sees it. */
+static int vtt_is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+/* The reference parses each field with TimeSpan.Parse, which is stricter than
+ * the regex-based path the other text formats use:
+ *
+ *   - the decimal separator is '.', never ',';
+ *   - the fraction has at most seven digits (100 ns ticks);
+ *   - the hour field must stay below 24 and the minute and second fields below
+ *     60, otherwise TimeSpan.Parse overflows;
+ *   - a leading '-' negates the value.
+ *
+ * The field's shape is validated first, so a malformed value cannot reach
+ * tc_parse_timestamp's integer accumulation with an absurd digit run. The
+ * day-based forms ("1.02:03:04") TimeSpan.Parse also accepts are not used by
+ * WebVTT and are rejected here. */
 static tc_status vtt_parse_time(const char *p, const char *end, int64_t *out_ns) {
+    while (p < end && (*p == ' ' || *p == '\t')) {
+        p++;
+    }
+    while (end > p && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    if (p == end) {
+        return tc_fail(TC_E_FORMAT, "vtt: empty cue time");
+    }
+
+    int neg = 0;
+    if (*p == '-') {
+        neg = 1;
+        p++;
+        if (p == end) {
+            return tc_fail(TC_E_FORMAT, "vtt: cue time is only a sign");
+        }
+    }
+
     char stack[64];
     size_t n = (size_t)(end - p);
     char *tmp = n < sizeof(stack) ? stack : tc_malloc(n + 1);
@@ -83,11 +116,73 @@ static tc_status vtt_parse_time(const char *p, const char *end, int64_t *out_ns)
     memcpy(tmp, p, n);
     tmp[n] = '\0';
 
+    /* Hours. A run of more than two digits is fine as long as its value stays
+     * below 24 ("000:00:26" is valid), so the cap is checked while scanning. */
+    size_t i = 0;
+    int64_t hours = 0;
+    while (i < n && vtt_is_digit(tmp[i])) {
+        hours = hours * 10 + (tmp[i] - '0');
+        if (hours > 23) {
+            goto bad;
+        }
+        i++;
+    }
+    if (i == 0 || i >= n || tmp[i] != ':') {
+        goto bad;
+    }
+
+    /* Minutes and seconds; both must stay below 60, and the seconds may be
+     * followed by the end of the field. */
+    for (int field = 0; field < 2; field++) {
+        i++;
+        int64_t value = 0;
+        size_t digits = 0;
+        while (i < n && vtt_is_digit(tmp[i])) {
+            value = value * 10 + (tmp[i] - '0');
+            if (value > 59) {
+                goto bad;
+            }
+            digits++;
+            i++;
+        }
+        if (digits == 0) {
+            goto bad;
+        }
+        if (field == 0 && (i >= n || tmp[i] != ':')) {
+            goto bad;
+        }
+    }
+
+    /* Optional fraction of at most seven digits. */
+    if (i < n && tmp[i] == '.') {
+        i++;
+        size_t digits = 0;
+        while (i < n && vtt_is_digit(tmp[i])) {
+            digits++;
+            i++;
+        }
+        if (digits == 0 || digits > 7) {
+            goto bad;
+        }
+    }
+    if (i != n) {
+        goto bad;
+    }
+
     tc_status st = tc_parse_timestamp(tmp, out_ns);
     if (st != TC_OK) {
-        /* Replace the helper's message with one that names the format. */
-        st = tc_fail(TC_E_FORMAT, "vtt: invalid cue time \"%s\"", tmp);
+        goto bad;
     }
+    if (neg) {
+        *out_ns = -*out_ns;
+    }
+    if (tmp != stack) {
+        free(tmp);
+    }
+    return TC_OK;
+
+bad:
+    st = tc_fail(TC_E_FORMAT, "vtt: invalid cue time \"%s\"", tmp);
     if (tmp != stack) {
         free(tmp);
     }

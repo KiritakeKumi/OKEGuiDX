@@ -1,0 +1,22 @@
+ffmpeg version 2022-05-26-git-0dcbe1c1aa-full_build-www.gyan.dev Copyright (c) 2000-2022 the FFmpeg developers
+Input #0, flac, from 'normal.flac':
+  Metadata:
+    encoder         : Lavf59.24.100
+  Duration: 00:00:02.00, start: 0.000000, bitrate: 133 kb/s
+  Stream #0:0: Audio: flac, 44100 Hz, mono, s16
+Stream mapping:
+  Stream #0:0 -> #0:0 (flac (native) -> pcm_s16le (native))
+Press [q] to stop, [?] for help
+Output #0, null, to '/dev/null':
+  Metadata:
+    encoder         : Lavf59.24.100
+  Stream #0:0: Audio: pcm_s16le, 44100 Hz, mono, s16, 705 kb/s
+    Metadata:
+      encoder         : Lavc59.32.100 pcm_s16le
+size=N/A time=00:00:00.10 bitrate=N/A speed= 331x    
+size=N/A time=00:00:02.00 bitrate=N/A speed= 403x    
+video:0kB audio:172kB subtitle:0kB other streams:0kB global headers:0kB muxing overhead: unknown
+[Parsed_volumedetect_0 @ 00000207b3cedbc0] n_samples: 88200
+[Parsed_volumedetect_0 @ 00000207b3cedbc0] mean_volume: -21.1 dB
+[Parsed_volumedetect_0 @ 00000207b3cedbc0] max_volume: -18.1 dB
+[Parsed_volumedetect_0 @ 00000207b3cedbc0] histogram_18db: 25600

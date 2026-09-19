@@ -1,0 +1,16 @@
+x265 [info]: HEVC encoder version 3.5+84-1a9d0ba7e
+x265 [info]: build info [Windows][GCC 12.2.0][64 bit] 8bit+10bit+12bit
+x265 [info]: using cpu capabilities: MMX2 SSE2Fast LZCNT SSSE3 SSE4.2 AVX FMA3 BMI2 AVX2
+x265 [info]: Main 10 profile, Level-4 (Main tier)
+x265 [info]: Thread pool created using 32 threads
+x265 [info]: frame threads / pool features       : 6 / wpp(17 rows)
+x265 [info]: tools: rd=5 psy-rd=1.50 rdoq=2 psy-rdoq=0.80
+x265 [info]: frame I:      1, Avg QP:14.61  kb/s: 42310.44
+x265 [info]: frame P:     68, Avg QP:17.55  kb/s: 11905.12
+x265 [info]: frame B:    255, Avg QP:23.21  kb/s: 2655.89
+x265 [info]: consecutive B-frames: 10.5% 6.2% 20.1% 63.2%
+x265 [info]: Weighted P-Frames: Y:3.4% UV:1.9%
+x265 [info]: 318/324 frames, 3.91 fps, 4795.06 kb/s, Avg QP:22.19
+x265 [info]: 320/324 frames, 3.95 fps, 4801.22 kb/s, Avg QP:22.21
+x265 [info]: 324/324 frames, 3.93 fps, 4803.77 kb/s, Avg QP:22.22
+x265 [info]: encoded 324 frames in 82.44s (3.93 fps), 4803.77 kb/s, Avg QP:22.22

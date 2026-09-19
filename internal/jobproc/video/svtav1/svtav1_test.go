@@ -463,6 +463,9 @@ func TestReconOutputIsNotTheBitstream(t *testing.T) {
 	if ReconOutput == `C:\out\ep.ivf` {
 		t.Error("ReconOutput must not be the bitstream path")
 	}
+	if ReconOutput != os.DevNull {
+		t.Errorf("ReconOutput = %q, want the platform null device", ReconOutput)
+	}
 }
 
 func TestPercentWithUnknownTotal(t *testing.T) {

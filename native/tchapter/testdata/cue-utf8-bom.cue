@@ -1,0 +1,8 @@
+﻿TITLE "中文标题"
+FILE "音乐.wav" WAVE
+  TRACK 01 AUDIO
+    TITLE "开场"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "结尾"
+    INDEX 01 00:30:37

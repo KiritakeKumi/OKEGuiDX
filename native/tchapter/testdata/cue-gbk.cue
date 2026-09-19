@@ -1,0 +1,8 @@
+TITLE "ÄãºÃ"
+FILE "Äã.wav" WAVE
+  TRACK 01 AUDIO
+    TITLE "ºÃ"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Äã"
+    INDEX 01 00:10:30

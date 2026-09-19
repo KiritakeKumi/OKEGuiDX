@@ -1,0 +1,14 @@
+PERFORMER "Zhong Wen"
+TITLE "Biao Ti"
+FILE "yin yue.wav" WAVE
+  TRACK 01 AUDIO
+    TITLE "Kai Chang"
+    PERFORMER "Ge Shou"
+    INDEX 00 00:00:00
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    TITLE "Dian Ying"
+    INDEX 01 01:23:45
+  TRACK 03 AUDIO
+    TITLE "Wei Sheng"
+    INDEX 01 02:00:74

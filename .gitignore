@@ -263,3 +263,10 @@ dist/windows/tools/
 # libtchapter
 native/tchapter/build/
 native/tchapter/out.txt
+
+# Test fixtures are data, not build output. The legacy rule above ("*.log")
+# would silently drop every .log fixture from the repository: the x265, l-smash,
+# qaac and eac3to packages all store real tool output that way, and a fresh
+# clone would be missing them. Negate the rule for testdata only.
+!**/testdata/**/*.log
+!**/testdata/**/*.txt

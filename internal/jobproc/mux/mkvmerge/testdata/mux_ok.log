@@ -1,0 +1,26 @@
+mkvmerge v34.0.0 ('Sight and Seen') 64-bit
+'v.hevc': Using the demultiplexer for the format 'HEVC/h.265'.
++-> Parsing the FLAC file. This can take a LONG time.
++-> Pre-parsing FLAC file: 50%
++-> Pre-parsing FLAC file: 75%
++-> Pre-parsing FLAC file: 100%
+
+'a1.flac': Using the demultiplexer for the format 'FLAC'.
++-> Parsing the FLAC file. This can take a LONG time.
++-> Pre-parsing FLAC file: 48%
++-> Pre-parsing FLAC file: 72%
++-> Pre-parsing FLAC file: 96%
++-> Pre-parsing FLAC file: 100%
+'a3.flac': Using the demultiplexer for the format 'FLAC'.
+'sub.ass.srt': Using the demultiplexer for the format 'SRT subtitles'.
+'v.hevc' track 0: Using the output module for the format 'HEVC/h.265 (unframed)'.
+'a1.flac' track 0: Using the output module for the format 'FLAC'.
+'a3.flac' track 0: Using the output module for the format 'FLAC'.
+'sub.ass.srt' track 0: Using the output module for the format 'text subtitles'.
+The file 'mux_ok.mkv' has been opened for writing.
+'v.hevc' track 0: Extracted the aspect ratio information from the HEVC video data and set the display dimensions to 640/360.
+Progress: 92%
+Progress: 100%
+
+The cue entries (the index) are being written...
+Multiplexing took 0 seconds.

@@ -72,14 +72,21 @@ static const char *xmlchapters_skip_space(const char *p, const char *end) {
     return p;
 }
 
+/* The components of a matched time code, before normalisation. */
 typedef struct xmlchapters_time {
     int64_t hours;
     int64_t minutes;
     int64_t seconds;
-    int millis;
+    /* Integer value of the first up-to-nine fraction digits, and how many
+     * digits there were (3..9). */
+    int64_t fraction;
+    int fraction_digits;
 } xmlchapters_time;
 
-/* Accumulates decimal digits, stopping the scan at `cap`. */
+/* Accumulates decimal digits, clamping once the value passes `cap`. The
+ * reference parses each component with int.Parse, which throws for anything
+ * above 2147483647; clamping to a smaller bound turns those values into a
+ * range error later instead, without risking int64 overflow. */
 static int64_t xmlchapters_digits(const char **cursor, const char *end, int64_t cap) {
     const char *p = *cursor;
     int64_t v = 0;
@@ -98,9 +105,7 @@ static int64_t xmlchapters_digits(const char **cursor, const char *end, int64_t 
  * does. The digit runs are greedy and a shorter run can never be followed by the
  * separator the pattern requires, so only the start of a run can match. */
 static int xmlchapters_find_time(const char *s, const char *end, xmlchapters_time *out) {
-    /* int.Parse rejects anything beyond Int32, and TimeSpan cannot hold values
-     * near this cap anyway; larger components are rejected below. */
-    const int64_t cap = 1000000000000000LL;
+    const int64_t cap = 999999999;
 
     for (const char *p = s; p < end; p++) {
         if (!isdigit((unsigned char)*p)) {
@@ -110,6 +115,7 @@ static int xmlchapters_find_time(const char *s, const char *end, xmlchapters_tim
             continue;
         }
 
+        /* hour */
         const char *q = p;
         int64_t hours = xmlchapters_digits(&q, end, cap);
         q = xmlchapters_skip_space(q, end);
@@ -117,6 +123,7 @@ static int xmlchapters_find_time(const char *s, const char *end, xmlchapters_tim
             continue;
         }
 
+        /* minute */
         q = xmlchapters_skip_space(q + 1, end);
         if (q >= end || !isdigit((unsigned char)*q)) {
             continue;
@@ -127,6 +134,7 @@ static int xmlchapters_find_time(const char *s, const char *end, xmlchapters_tim
             continue;
         }
 
+        /* second */
         q = xmlchapters_skip_space(q + 1, end);
         if (q >= end || !isdigit((unsigned char)*q)) {
             continue;
@@ -137,26 +145,24 @@ static int xmlchapters_find_time(const char *s, const char *end, xmlchapters_tim
             continue;
         }
 
-        /* The pattern takes 3 to 9 digits, and ToTimeSpan keeps the first
-         * three, so ".123456789" is 123 ms. */
+        /* Fraction: the pattern takes 3 to 9 digits. */
         q = xmlchapters_skip_space(q + 1, end);
-        int millis = 0;
-        int frac_digits = 0;
-        while (q < end && isdigit((unsigned char)*q) && frac_digits < 9) {
-            if (frac_digits < 3) {
-                millis = millis * 10 + (*q - '0');
-            }
+        int64_t fraction = 0;
+        int digits = 0;
+        while (q < end && isdigit((unsigned char)*q) && digits < 9) {
+            fraction = fraction * 10 + (*q - '0');
             q++;
-            frac_digits++;
+            digits++;
         }
-        if (frac_digits < 3) {
+        if (digits < 3) {
             continue;
         }
 
         out->hours = hours;
         out->minutes = minutes;
         out->seconds = seconds;
-        out->millis = millis;
+        out->fraction = fraction;
+        out->fraction_digits = digits;
         return 1;
     }
     return 0;
@@ -179,45 +185,56 @@ static tc_status xmlchapters_time_value(const tc_xml_node *node, int64_t *out_ns
     tc_buf_free(&text);
 
     if (!found) {
+        /* No match: the reference falls back to TimeSpan.Zero. */
         *out_ns = 0;
         return TC_OK;
     }
 
-    /* TimeSpan normalises oversized minute and second fields, so "00:99:00" is
-     * 99 minutes. */
+    /* TimeSpan normalises oversized minute and second fields, so "00:99:00"
+     * is 99 minutes. The components were clamped, so this cannot overflow. */
     int64_t total_seconds = t.hours * 3600 + t.minutes * 60 + t.seconds;
-    /* Nanoseconds cap a timestamp at ~2.56 million hours; the reference's
-     * TimeSpan reaches 100 times further but throws past that, so an absurd
-     * value is reported as a format error rather than wrapped. */
-    if (total_seconds > 9223372036LL) {
+    /* The library stores nanoseconds in an int64, which caps a timestamp at
+     * ~2.56 million hours; the reference's TimeSpan holds 100 times more, but
+     * no chapter list approaches either bound. Beyond it the reference throws
+     * a TimeSpan overflow and this returns a format error. */
+    if (total_seconds > 9223372035LL) {
         return tc_fail(TC_E_FORMAT, "xml: timestamp is out of range");
     }
 
+    /* ToTimeSpan divides the fraction by 10^(digits-3) and scales it to 100 ns
+     * ticks. Both steps are IEEE-754 doubles in the reference, and that is not
+     * equivalent to integer scaling: ".1234" is 123.4 ms, not 123 ms. The
+     * operation order is reproduced here exactly. */
+    static const double pow10[] = {1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0};
+    double millis = (double)t.fraction / pow10[t.fraction_digits - 3];
+    int64_t ticks = (int64_t)(millis * 10000.0);
+
+    /* tc_parse_timestamp converts the whole seconds; the fraction is added as
+     * ticks because its precision is not a whole number of nanoseconds. */
     int64_t hours = total_seconds / 3600;
     int64_t rest = total_seconds % 3600;
-
-    /* tc_parse_timestamp does the actual conversion; the normalised form is
-     * "H:MM:SS.mmm" with exactly three fraction digits. */
     tc_buf canon;
     tc_buf_init(&canon);
-    tc_buf_put_i64(&canon, hours, 0);
+    tc_buf_put_i64(&canon, hours, 2);
     tc_buf_putc(&canon, ':');
     tc_buf_put_i64(&canon, rest / 60, 2);
     tc_buf_putc(&canon, ':');
     tc_buf_put_i64(&canon, rest % 60, 2);
-    tc_buf_putc(&canon, '.');
-    tc_buf_put_i64(&canon, t.millis, 3);
     if (canon.oom) {
         tc_buf_free(&canon);
         return TC_E_NOMEM;
     }
 
-    tc_status st = tc_parse_timestamp(canon.data, out_ns);
-    if (st != TC_OK) {
-        st = tc_fail(TC_E_FORMAT, "xml: invalid timestamp \"%s\"", canon.data);
-    }
+    int64_t ns = 0;
+    tc_status st = tc_parse_timestamp(canon.data, &ns);
     tc_buf_free(&canon);
-    return st;
+    if (st != TC_OK) {
+        return tc_fail(TC_E_FORMAT, "xml: invalid timestamp");
+    }
+
+    /* total_seconds was bounded so that this cannot overflow. */
+    *out_ns = ns + ticks * 100;
+    return TC_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,11 +307,28 @@ tc_status tc_xmlchapters_parse_mem(const void *buf, size_t len, const char *hint
         return st;
     }
 
-    /* The serialiser is case-sensitive and requires this exact root. */
-    const tc_xml_node *chapters = tc_xml_child(root, "Chapters");
-    if (!chapters) {
+    /* The document element must be <Chapters> in no namespace. XmlSerializer
+     * binds the root element by name, so a wrapper around <Chapters> is a
+     * different document, and a default namespace has to be checked explicitly:
+     * the element name is still "Chapters" while the serialiser would refuse to
+     * bind it. The comparison is case-sensitive, like the serialiser. */
+    const tc_xml_node *doc_element = NULL;
+    for (size_t i = 0; i < root->child_count; i++) {
+        if (root->children[i].kind == TC_XML_ELEMENT) {
+            doc_element = &root->children[i];
+            break;
+        }
+    }
+    if (!doc_element || !doc_element->name || strcmp(doc_element->name, "Chapters") != 0) {
         tc_xml_free(root);
         return tc_fail(TC_E_FORMAT, "xml: no <Chapters> root element");
+    }
+    const tc_xml_node *chapters = doc_element;
+    const char *xmlns = tc_xml_attr(chapters, "xmlns");
+    if (xmlns && xmlns[0] != '\0') {
+        tc_xml_free(root);
+        return tc_fail(TC_E_FORMAT,
+                       "xml: <Chapters> must not be in a namespace (found \"%s\")", xmlns);
     }
 
     for (size_t i = 0; i < chapters->child_count; i++) {

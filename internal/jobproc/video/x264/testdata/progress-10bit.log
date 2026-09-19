@@ -1,0 +1,9 @@
+x264 [info]: using cpu capabilities: MMX2 SSE2Fast SSSE3 SSE4.2 AVX AVX2
+x264 [info]: profile High 10, level 5.0, 4:2:0, 10-bit
+x264 [info]: frame I:     12    Avg QP:17.11  size: 118420
+x264 [info]: frame P:   3011    Avg QP:20.02  size: 22410
+x264 [info]: frame B:   9977    Avg QP:24.55  size:  5104
+x264 [info]: kb/s:3120.44
+x264 [info]: 12990 frames: 4.56 fps, 3120.44 kb/s
+x264 [info]: 13000 frames: 4.58 fps, 3121.02 kb/s
+x264 [info]: encoded 13000 frames, 4.58 fps, 3121.02 kb/s
