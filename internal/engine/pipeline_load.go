@@ -1,0 +1,108 @@
+package engine
+
+import (
+	"github.com/KiritakeKumi/OKEGuiDX/internal/log"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
+)
+
+// loadProfile is the first stage: recover the profile and the episode config for
+// the task being run.
+//
+// It is a stage rather than a constructor step because the worker pool hands the
+// pipeline a task it read from the queue, and model.Task deliberately carries the
+// profile as an opaque `any`: the queue only knows a path, which lives in
+// TaskManager. PipelineOptions.LoadProfile is that mapping, and the caller closes
+// over its own queue to supply it.
+//
+// When the task still holds the typed values profile.ToModel put there (the
+// in-process case), they are used directly and the loader is not called at all.
+func (p *Pipeline) loadProfile(t *model.Task, rep *reporter) (*runState, error) {
+	rep.step(statusFetchInfo, -1)
+
+	prof, cfg, err := p.profileFor(t)
+	if err != nil {
+		return nil, err
+	}
+	if prof == nil {
+		return nil, okerr.New(okerr.KindConfig, "找不到配置文件", "任务 %s 没有可用的配置", t.ID)
+	}
+
+	// The wizard was the only place that ever set IsReEncode, and it did so from
+	// the episode config's EnableReEncode. The two are reconciled here so that a
+	// task recovered from the queue behaves like one a wizard produced.
+	prof.IsReEncode = prof.IsReEncode || (cfg != nil && cfg.EnableReEncode)
+	if prof.IsReEncode && cfg == nil {
+		return nil, okerr.New(okerr.KindConfig, "参数不完整",
+			"ReEncode 任务 %s 没有关联的 episode 配置（ReEncodeOldFile 与 ReEncodeSliceArray）", t.ID)
+	}
+
+	// Re-check what the pipeline depends on. The queue may hold a task whose
+	// profile was edited afterwards, and a re-encode is the case where a wrong
+	// field produces a wrong release rather than a failed run.
+	if err := validateForRun(prof, cfg); err != nil {
+		return nil, err
+	}
+
+	st := &runState{
+		opts:  &p.opts,
+		t:     t,
+		p:     prof,
+		cfg:   cfg,
+		media: model.NewMediaFile(),
+		mka:   model.NewMediaFile(),
+	}
+	t.IsReEncode = prof.IsReEncode
+	log.Info("-------------------------------------------------------------------")
+	log.Info("开始处理任务", "input", st.inputPath())
+	return st, nil
+}
+
+// profileFor resolves the typed profile for a task, preferring what the task
+// already carries.
+func (p *Pipeline) profileFor(t *model.Task) (*profile.Profile, *profile.EpisodeConfig, error) {
+	if t == nil {
+		return nil, nil, okerr.New(okerr.KindConfig, "任务为空", "无法为 nil 任务加载配置")
+	}
+	if prof, ok := t.Profile.(*profile.Profile); ok && prof != nil {
+		if cfg, ok := t.Config.(*profile.EpisodeConfig); ok {
+			return prof, cfg, nil
+		}
+		return prof, nil, nil
+	}
+	return p.opts.LoadProfile(t)
+}
+
+// validateForRun re-applies the checks the pipeline relies on. It is deliberately
+// narrower than profile.Validate: that function needs the VapourSynth
+// installation and the source files, which cannot be re-checked on every run,
+// while these checks are pure profile arithmetic.
+func validateForRun(p *profile.Profile, cfg *profile.EpisodeConfig) error {
+	if p.InputScript == "" {
+		return okerr.New(okerr.KindConfig, "vpy文件找不到",
+			"配置 %s 没有指定 InputScript", p.ConfigFilePath)
+	}
+	if p.WorkingPathPrefix == "" {
+		return okerr.New(okerr.KindConfig, "工作目录没有指定",
+			"配置 %s 没有工作路径前缀，无法为任务生成中间文件", p.ConfigFilePath)
+	}
+	if p.OutputPathPrefix == "" {
+		return okerr.New(okerr.KindConfig, "输出目录没有指定",
+			"配置 %s 没有输出路径前缀，无法确定成品位置", p.ConfigFilePath)
+	}
+	switch profile.EncoderType(p.EncoderType) {
+	case profile.EncoderX264, profile.EncoderX265, profile.EncoderSVTAV1:
+	default:
+		return okerr.New(okerr.KindConfig, "编码器版本错误",
+			"EncoderType 请填写 x264/x265/svtav1（当前 %q）", p.EncoderType)
+	}
+	if p.FpsNum <= 0 || p.FpsDen <= 0 {
+		return okerr.New(okerr.KindConfig, "帧率没有指定诶",
+			"配置 %s 的 FpsNum/FpsDen 不合法（%d/%d）", p.ConfigFilePath, p.FpsNum, p.FpsDen)
+	}
+	if cfg == nil {
+		return nil
+	}
+	return profile.ValidateEpisodeConfig(cfg)
+}
