@@ -178,6 +178,45 @@ tc_status tc_xpl_parse_mem(const void *buf, size_t len, const char *hint, tc_dat
 tc_status tc_not_implemented(tc_format fmt);
 
 /* ------------------------------------------------------------------ */
+/* B13: chapter-name expressions                                      */
+/* ------------------------------------------------------------------ */
+
+/* A compiled chapter expression. Opaque; created by tc_expression_parse and
+ * released with tc_expression_free. Implemented in tc_expression.c, which is
+ * not a parser and is therefore not registered in the parser table. */
+typedef struct tc_expression tc_expression;
+
+/* Evaluates `expr` at `time` seconds with frame rate `fps`. On any evaluation
+ * failure *out is set to `time` (the reference's fallback) and TC_E_FORMAT is
+ * returned; the caller may use *out either way. */
+tc_status tc_expression_eval(const char *expr, double time, double fps, double *out);
+
+/* Compiles `expr` once for repeated evaluation. Returns 0 and leaves *out NULL
+ * when the expression does not compile. */
+int tc_expression_parse(const char *expr, tc_expression **out);
+
+/* Evaluates a compiled expression; same fallback rules as tc_expression_eval. */
+tc_status tc_expression_eval_compiled(const tc_expression *expr, double time, double fps,
+                                      double *out);
+
+/* Releases a compiled expression. Passing NULL is allowed. */
+void tc_expression_free(tc_expression *expr);
+
+/* Formats `v` as C# `value.ToString("0.00")`: two decimals, half away from
+ * zero, no negative zero. `buf` should hold at least 16 bytes. */
+void tc_expression_format(double v, char *buf, size_t buflen);
+
+/* TChapter.Util.ChapterName.Get(index) as `format + " " + index:D2`. `format`
+ * may be NULL, which selects "Chapter". */
+tc_status tc_chapter_name(char *buf, size_t buflen, const char *format, int index);
+
+/* TChapter.Util.ChapterName.Range(start, count), one name per line and no
+ * trailing newline. The reference's ArgumentOutOfRangeException cases (start
+ * outside 0..99, negative count, start + count - 1 > 99) return TC_E_RANGE. */
+tc_status tc_chapter_name_range(char *buf, size_t buflen, const char *format, int start,
+                                int count);
+
+/* ------------------------------------------------------------------ */
 /* Shared helpers for parsers                                         */
 /* ------------------------------------------------------------------ */
 

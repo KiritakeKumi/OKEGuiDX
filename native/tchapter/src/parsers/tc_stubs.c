@@ -17,27 +17,3 @@
 
 #include "tc_internal.h"
 
-/* --- B3: Blu-ray disc structure ------------------------------------------ */
-
-tc_status tc_bdmv_parse_file(const char *path, tc_data *d) {
-    (void)path;
-    (void)d;
-    return tc_not_implemented(TC_FMT_BDMV);
-}
-
-/* --- B6: TAK APE tag ----------------------------------------------------- */
-
-tc_status tc_tak_parse_file(const char *path, tc_data *d) {
-    (void)path;
-    (void)d;
-    return tc_not_implemented(TC_FMT_TAK);
-}
-
-/* --- B8: MP4 chapter boxes ----------------------------------------------- */
-
-tc_status tc_mp4_parse_file(const char *path, tc_data *d) {
-    (void)path;
-    (void)d;
-    return tc_not_implemented(TC_FMT_MP4);
-}
-
