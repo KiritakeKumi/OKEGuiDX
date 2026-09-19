@@ -248,6 +248,9 @@ type settings struct {
 	logFile   *os.File
 	queuePath string
 	configDir string
+	// appCfg is the OKEGuiConfig.json content, for the options that have no
+	// accessor on configLoader (avx512, reducePath).
+	appCfg platform.Config
 }
 
 // setLogLevel applies a level and then re-points the logger at the command's
@@ -282,7 +285,7 @@ func (a *application) bootstrap(o *options) (*settings, error) {
 	}
 	setLogLevel(a.stderr, level)
 
-	s := &settings{role: role}
+	s := &settings{role: role, appCfg: a.config.Config()}
 
 	if o.logDir != "" {
 		path, f, err := platform.SetupLogging(o.logDir, level)

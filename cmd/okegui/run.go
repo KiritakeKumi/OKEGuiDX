@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,8 +15,6 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/log"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/node"
-	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
-	"github.com/KiritakeKumi/OKEGuiDX/internal/platform"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
 )
@@ -96,33 +93,24 @@ const drainPoll = 100 * time.Millisecond
 // execute queues the tasks and runs the worker pool until the queue drains or
 // the context is cancelled.
 func (a *application) execute(s *settings, o *runOptions, tasks []loadedTask) error {
-	tm, err := engine.New(engine.Options{QueuePath: s.queuePath})
+	parts, err := assemble(assembleOptions{Settings: s, WorkerCount: o.workers})
 	if err != nil {
-		// A damaged queue file is reported, but the run continues on an empty
-		// queue: refusing to work because a recovery file is stale would be
-		// worse than losing it.
-		log.Warn("任务队列无法读取，将从空队列开始", "path", s.queuePath, "err", err)
+		return err
 	}
-
-	exec := engine.NewLocalExecutor(s.caps, a.taskRunner())
-	wm := engine.NewWorkerManager(exec, tm, platform.NewNumaWithCount(s.caps.NUMANodes))
 
 	// The sink is installed before the first task can start, otherwise the
 	// opening progress lines would be lost.
 	report := newProgressReporter(a.stderr)
-	wm.SetEventSink(report.report)
+	parts.Workers.SetEventSink(report.report)
 
 	for _, lt := range tasks {
-		if _, err := wm.AddTask(lt.task, lt.configPath); err != nil {
+		if _, err := parts.Workers.AddTask(lt.task, lt.configPath); err != nil {
 			return err
 		}
 	}
 
 	count := o.workerCount(s.caps)
-	for i := range count {
-		wm.AddWorker(i + 1)
-	}
-	if !wm.Start() {
+	if !parts.Workers.Start() {
 		return fail(exitFailure, "没有可用的工作单元，任务未执行")
 	}
 	log.Info("开始处理任务", "tasks", len(tasks), "workers", count)
@@ -131,9 +119,9 @@ func (a *application) execute(s *settings, o *runOptions, tasks []loadedTask) er
 	// nothing would ever signal completion. The queue cannot be empty here
 	// (AddTask enables every task), but waiting forever is the worst possible
 	// failure mode for a command line, so it is checked rather than assumed.
-	if tm.GetActiveTaskCount() == 0 && wm.GetBGWorkerCount() == 0 {
+	if parts.Tasks.GetActiveTaskCount() == 0 && parts.Workers.GetBGWorkerCount() == 0 {
 		report.finish()
-		return tally(tm, len(tasks))
+		return tally(parts.Tasks, len(tasks))
 	}
 
 	// The pool exposes no completion channel, and SetAfterFinish only fires
@@ -146,7 +134,7 @@ func (a *application) execute(s *settings, o *runOptions, tasks []loadedTask) er
 		ticker := time.NewTicker(drainPoll)
 		defer ticker.Stop()
 		for range ticker.C {
-			if !wm.IsRunning() {
+			if !parts.Workers.IsRunning() {
 				return
 			}
 		}
@@ -159,22 +147,16 @@ func (a *application) execute(s *settings, o *runOptions, tasks []loadedTask) er
 		// Stop cancels the running tasks and waits for the workers to wind
 		// down, so no child process is left behind on the way out.
 		log.Info("收到终止信号，正在停止任务")
-		wm.Stop()
+		parts.Workers.Stop()
 		report.finish()
 		return a.ctx.Err()
 	}
-	return tally(tm, len(tasks))
+	return tally(parts.Tasks, len(tasks))
 }
 
 // workerCount resolves how many workers to register.
 func (o *runOptions) workerCount(caps node.Capabilities) int {
-	if o.workers > 0 {
-		return o.workers
-	}
-	if caps.NUMANodes > 0 {
-		return caps.NUMANodes
-	}
-	return 1
+	return workerCount(o.workers, caps.NUMANodes)
 }
 
 // tally turns the final queue state into an exit code. A run where every task
@@ -239,20 +221,7 @@ func printRunUsage(w io.Writer) {
 `)
 }
 
-// taskRunner returns the RunFunc the local executor calls for each task.
-//
-// The pipeline that turns a task into demux/encode/mux steps is D3 and does not
-// exist yet, so this refuses to run rather than pretending to. The refusal is a
-// normal task failure, which keeps the exit-code contract honest: the CLI ran,
-// the task failed, exit 2.
-func (a *application) taskRunner() engine.RunFunc {
-	return func(_ context.Context, t *model.Task, events chan<- model.StatusEvent) error {
-		log.Error("任务流水线尚未实现（D3）", "task", t.ID, "name", t.Name)
-		events <- model.StatusEvent{TaskID: t.ID, Progress: model.TaskRunning, Step: "pipeline", Percent: -1}
-		return okerr.New(okerr.KindUnknown, "任务流水线尚未实现",
-			"D3 engine/pipeline 尚未落地，当前版本无法真正执行任务（task %s）。", t.ID)
-	}
-}
+// printRunUsage writes the help text of `okegui run`.
 
 // loadTasks reads, validates and converts every profile. All profiles are
 // checked before anything runs, so a typo in the last file does not leave the

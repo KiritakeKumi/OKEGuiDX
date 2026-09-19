@@ -5,15 +5,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"os/exec"
+	"runtime"
+	"time"
+
+	"github.com/KiritakeKumi/OKEGuiDX/internal/log"
 )
 
 // guiCommand starts the daemon and opens the browser front end.
 //
 // PLAN.md §1 fixes the shape: the Web UI is served by the same process, so
-// `gui` is `daemon` plus a browser launch. The address is not reachable until
-// E2 wires the HTTP server in, so the command prints where the UI will live and
-// says plainly that it is not up yet, rather than opening a browser on a dead
-// port.
+// `gui` is `daemon` plus a browser launch. The service itself is identical —
+// same engine, same HTTP front end, same signals — so the only thing this
+// command owns is the browser.
 func (a *application) guiCommand(args []string) error {
 	fs := flag.NewFlagSet("gui", flag.ContinueOnError)
 	var o daemonOptions
@@ -31,30 +36,74 @@ func (a *application) guiCommand(args []string) error {
 		return fail(exitUsage, "gui 不接受位置参数：%v", fs.Args())
 	}
 
-	fmt.Fprintf(a.stdout, "界面地址（E2 落地后可用）: http://%s/\n", o.addr)
+	// The browser needs the port the service actually bound, so the listener is
+	// opened here and handed to the daemon's lifecycle. `gui` never binds port
+	// 0 in practice, but going through the same path keeps one code path for
+	// both commands.
+	if o.listener == nil {
+		ln, err := net.Listen("tcp", o.addr)
+		if err != nil {
+			return fail(exitUsage, "无法监听 %s：%v", o.addr, err)
+		}
+		o.listener = ln
+	}
+
 	if openBrowser {
-		fmt.Fprintln(a.stdout, "浏览器启动: 等待 E2 提供 HTTP 服务后启用")
+		go openWhenReady("http://"+o.listener.Addr().String()+"/", a.ctx.Done())
 	} else {
 		fmt.Fprintln(a.stdout, "浏览器启动: 已禁用（--open=false）")
 	}
 
-	// gui shares the daemon's lifecycle from here on: same service, same
-	// signals, same graceful shutdown. Only the browser launch differs, and
-	// that lands with E2.
 	return a.runService(&o)
+}
+
+// browserDelay is how long the launch waits before the first attempt: the
+// server is already listening, so the wait only covers the handler being
+// installed.
+const browserDelay = 250 * time.Millisecond
+
+// openWhenReady opens url in the default browser once the service is up.
+//
+// It runs in the background because the command must not block on a browser:
+// a headless machine has none, and that must not stop the daemon. The failure
+// is logged rather than returned for the same reason.
+func openWhenReady(url string, stop <-chan struct{}) {
+	select {
+	case <-time.After(browserDelay):
+	case <-stop:
+		return
+	}
+	if err := openBrowser(url); err != nil {
+		log.Warn("无法启动浏览器，请手动打开界面地址", "url", url, "err", err)
+		return
+	}
+	log.Info("已在默认浏览器中打开界面", "url", url)
+}
+
+// openBrowser asks the operating system to open url.
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "windows":
+		// rundll32 is the documented way to reach the shell's URL handler
+		// without a cmd.exe in the middle.
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
 }
 
 // printGUIUsage writes the help text of `okegui gui`.
 func printGUIUsage(w io.Writer) {
 	fmt.Fprint(w, `用法: okegui gui [选项]
 
-启动常驻服务并打开默认浏览器。服务部分与 'okegui daemon' 完全相同。
-
-界面尚未接入：E2 提供 HTTP 服务后，本命令才会真正拉起浏览器。
+启动常驻服务并打开默认浏览器。服务部分与 'okegui daemon' 完全相同：
+同一套 REST 接口、WebSocket 进度流与内嵌界面。
 
 选项:
   --open                 启动后打开默认浏览器（默认 true）
-  --addr HOST:PORT       HTTP 接口监听地址（默认 127.0.0.1:8090）
+  --addr HOST:PORT       HTTP 接口监听地址（默认 127.0.0.1:8090，必须是回环地址）
   --shutdown-grace DUR   优雅关闭等待在跑任务的最长时间（默认 30s）
   --pid-file PATH        写入进程号的路径
   --queue PATH           任务队列文件，默认为配置目录下的 queue.json

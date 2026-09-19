@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OKEGuiDX</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>OKEGuiDX</h1>
+      <p class="banner">
+        接线阶段的最小页面：读取 <code>/api/v1/status</code> 与
+        <code>/api/v1/tasks</code>，并订阅 <code>/api/v1/events</code>。
+        正式界面（任务列表 / 新建向导 / 设置面板）由 F 批实现，本页会被替换。
+      </p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>节点与工作单元</h2>
+        <div id="status" class="muted">正在读取…</div>
+        <div class="actions">
+          <button id="refresh" type="button">刷新</button>
+          <button id="pool-start" type="button">启动工作单元</button>
+          <button id="pool-stop" type="button">停止工作单元</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>任务</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>输入</th>
+              <th>状态</th>
+              <th>阶段</th>
+              <th>进度</th>
+            </tr>
+          </thead>
+          <tbody id="task-rows"></tbody>
+        </table>
+        <p id="tasks-empty" class="muted">队列为空。</p>
+      </section>
+
+      <section class="panel">
+        <h2>事件流</h2>
+        <div id="events" class="events"></div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

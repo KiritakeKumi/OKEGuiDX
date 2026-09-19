@@ -1,0 +1,65 @@
+:root {
+  color-scheme: light dark;
+  --border: #8884;
+  --muted: #888;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 1rem;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+header h1 {
+  margin-bottom: 0.25rem;
+}
+
+.banner {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.panel {
+  margin-top: 1.5rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+button {
+  padding: 0.35rem 0.75rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.events {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  height: 12rem;
+  overflow-y: auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.8rem;
+}

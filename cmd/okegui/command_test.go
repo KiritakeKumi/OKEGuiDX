@@ -284,10 +284,11 @@ func TestRunRejectsMissingInputsAndScript(t *testing.T) {
 	})
 }
 
-// TestRunFailsTasksWithoutPipeline covers the exit code a real run produces
-// while D3 is missing. It asserts the contract rather than the pipeline: the
-// CLI ran, the task could not be carried out, so the code is exitTaskFailed.
-func TestRunFailsTasksWithoutPipeline(t *testing.T) {
+// TestRunFailsTasksWithUnusableSources covers the exit code a real run produces
+// when the task cannot be carried out. The fixture's "input" is a text file, so
+// the pipeline refuses it; what is asserted is the contract, not the pipeline:
+// the CLI ran, the task failed, so the code is exitTaskFailed.
+func TestRunFailsTasksWithUnusableSources(t *testing.T) {
 	f := newFixture(t, "MKV", 1)
 
 	got := runCLI(t, f.runArgs("run", f.profile)...)
@@ -540,10 +541,10 @@ func TestHelpTextsAreAvailable(t *testing.T) {
 	}
 }
 
-// TestGUIPrintsThePendingAddress asserts `gui` says where the interface will
-// live and does not claim to have opened a browser before E2 exists. It reuses
-// the daemon's lifecycle, so the shutdown path is exercised too.
-func TestGUIPrintsThePendingAddress(t *testing.T) {
+// TestGUIPrintsTheInterfaceAddress asserts `gui` reports where the interface
+// lives and honours --open=false. It reuses the daemon's lifecycle, so the
+// shutdown path is exercised too.
+func TestGUIPrintsTheInterfaceAddress(t *testing.T) {
 	f := newFixture(t, "MKV", 1)
 
 	// gui never returns on its own: it waits for a signal like the daemon. The
@@ -562,16 +563,16 @@ func TestGUIPrintsThePendingAddress(t *testing.T) {
 	if !strings.Contains(got.stdout, "浏览器启动: 已禁用") {
 		t.Errorf("gui ignored --open=false:\n%s", got.stdout)
 	}
-	if !strings.Contains(got.stdout, "等待 E2") {
-		t.Errorf("gui did not report that the browser launch is pending:\n%s", got.stdout)
-	}
 }
 
 // TestGUIAcceptsTheDaemonFlags asserts `gui` shares the daemon's flag set, so
 // an operator does not have to learn a second one.
 func TestGUIAcceptsTheDaemonFlags(t *testing.T) {
 	f := newFixture(t, "MKV", 1)
-	args := f.runArgs("gui", "--shutdown-grace", "2s", "--pid-file", filepath.Join(f.dir, "gui.pid"))
+	// Port 0 binds a free port: the test must not collide with a daemon the
+	// operator happens to have running on 8090.
+	args := f.runArgs("gui", "--addr", "127.0.0.1:0", "--open=false",
+		"--shutdown-grace", "2s", "--pid-file", filepath.Join(f.dir, "gui.pid"))
 	got := runCLIWithCancelledContext(t, args...)
 
 	if got.code != exitOK {

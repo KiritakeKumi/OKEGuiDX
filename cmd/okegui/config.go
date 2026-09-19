@@ -82,6 +82,11 @@ func loadConfigFile(path string) (platform.Config, error) {
 // LogLevel returns the configured log level.
 func (c *configLoader) LogLevel() string { return c.cfg.LogLevel }
 
+// Config returns the whole settings object. The daemon needs fields that have
+// no accessor of their own (avx512, reducePath); they are read here rather than
+// through a growing list of one-line getters.
+func (c *configLoader) Config() platform.Config { return c.cfg }
+
 // SingleNUMA reports whether per-socket pinning is disabled.
 func (c *configLoader) SingleNUMA() bool { return c.cfg.SingleNUMA }
 
