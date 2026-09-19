@@ -3,6 +3,8 @@ package chapter
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
@@ -49,6 +51,10 @@ type Parser struct {
 	// Tool is the absolute path to the `tchapter` executable. It is required;
 	// nothing is discovered here.
 	Tool string
+	// MkvExtract is the absolute path to `mkvextract`. It is required only by
+	// ParseMatroska, because the CLI has no EBML reader and the reference
+	// MATROSKAParser ran mkvextract before handing the XML to its XML parser.
+	MkvExtract string
 	// Priority is applied to the child process. Zero means the package
 	// default.
 	Priority proc.Priority
@@ -63,18 +69,27 @@ type Parser struct {
 // Name is the tool name used in logs and errors.
 const Name = "tchapter"
 
-// Parse reads every entry of a chapter file.
+// mkvExtractTool is the tool name used in logs and errors for mkvextract.
+const mkvExtractTool = "mkvextract"
+
+// Parse reads every entry of a chapter file, using the parser's configured
+// format.
+func (p *Parser) Parse(ctx context.Context, path string) ([]*Info, error) {
+	return p.ParseFormat(ctx, path, p.Format)
+}
+
+// ParseFormat reads every entry of a chapter file, forcing one CLI format.
 //
 // A parse failure is a structured error carrying the CLI's own status and
 // message, so the operator sees "E_FORMAT: ..." rather than a generic failure.
-func (p *Parser) Parse(ctx context.Context, path string) ([]*Info, error) {
+func (p *Parser) ParseFormat(ctx context.Context, path, format string) ([]*Info, error) {
 	if p.Tool == "" {
 		return nil, okerr.New(okerr.KindNotFound, "找不到外部工具",
 			"未指定 %s 可执行文件路径", Name)
 	}
 	args := []string{"info", path}
-	if p.Format != "" {
-		args = append(args, p.Format)
+	if format != "" {
+		args = append(args, format)
 	}
 	priority := p.Priority
 	if priority == 0 {
@@ -127,6 +142,74 @@ func (p *Parser) ParseFirst(ctx context.Context, path string) (*Info, error) {
 		return nil, nil
 	}
 	return infos[0], nil
+}
+
+// ParseMatroska reads the chapters embedded in a Matroska file.
+//
+// libtchapter has no EBML reader: its Matroska parser takes the XML that
+// `mkvextract chapters` writes, which is exactly what the reference
+// MATROSKAParser did (it ran mkvextract and handed the stdout to XMLParser).
+// The extraction therefore happens here, and its output is parsed as the
+// Matroska XML format.
+//
+// A Matroska file with no chapter track makes mkvextract exit non-zero with
+// "Error: ..." on stderr and nothing on stdout; the reference threw
+// "No Chapter Found" there, and the chapter service treats an empty list as
+// "skip chapters", so that case returns no entries rather than an error.
+func (p *Parser) ParseMatroska(ctx context.Context, path string) ([]*Info, error) {
+	if p.MkvExtract == "" {
+		return nil, okerr.New(okerr.KindNotFound, "找不到外部工具",
+			"未指定 %s 可执行文件路径", mkvExtractTool)
+	}
+	priority := p.Priority
+	if priority == 0 {
+		priority = proc.DefaultPriority
+	}
+
+	res, err := proc.Run(ctx, proc.Spec{
+		Path:     p.MkvExtract,
+		Args:     []string{"chapters", path},
+		Env:      p.Env,
+		Priority: priority,
+		Name:     mkvExtractTool,
+	})
+	if err != nil {
+		// A non-zero exit with nothing on stdout is what mkvextract does when
+		// the file simply has no chapter track: not a failure, an empty list.
+		// A nil result means the process never ran at all (a missing binary,
+		// for instance), and that must stay an error.
+		if res != nil && strings.TrimSpace(res.Stdout) == "" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(res.Stdout) == "" {
+		return nil, nil
+	}
+
+	return p.parseDocument(ctx, res.Stdout, "matroska")
+}
+
+// parseDocument runs the CLI over an in-memory XML document by way of a
+// temporary file, because the CLI only reads paths. It is used for mkvextract
+// output, which arrives on stdout.
+func (p *Parser) parseDocument(ctx context.Context, body, format string) ([]*Info, error) {
+	f, err := os.CreateTemp("", "okegui-chapters-*.xml")
+	if err != nil {
+		return nil, okerr.Wrap(err, okerr.KindIO, "无法写入临时章节文件", "%v", err)
+	}
+	name := f.Name()
+	defer func() { _ = os.Remove(name) }()
+
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		return nil, okerr.Wrap(err, okerr.KindIO, "无法写入临时章节文件", "%s: %v", name, err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, okerr.Wrap(err, okerr.KindIO, "无法写入临时章节文件", "%s: %v", name, err)
+	}
+
+	return p.ParseFormat(ctx, name, format)
 }
 
 func (e parseEntry) toInfo() *Info {

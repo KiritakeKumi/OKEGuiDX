@@ -203,7 +203,9 @@ func (s *Service) FindChapterFile(task *model.Task) (bool, error) {
 //
 //   - The MediaInfo/MPLS/MKV branches all go through the tchapter CLI. For an
 //     MPLS source the entry whose SourceName matches the input's clip name is
-//     chosen, which is what GetChapterFromMPLS did.
+//     chosen, which is what GetChapterFromMPLS did; for a Matroska source the
+//     chapters are extracted with mkvextract first, because the CLI has no
+//     EBML reader.
 //   - The legacy code threw a plain Exception for a missing chapter file;
 //     here it is a structured error.
 //
@@ -242,7 +244,15 @@ func (s *Service) LoadChapter(ctx context.Context, task *model.Task) (*Info, err
 	case model.ChapterMaybe:
 		info, err = s.loadFromPlaylist(ctx, task)
 	case model.ChapterMKV:
-		info, err = s.Parser.ParseFirst(ctx, s.inputPath(task))
+		// The CLI cannot read EBML; mkvextract has to run first, exactly as
+		// the reference MATROSKAParser did.
+		infos, parseErr := s.Parser.ParseMatroska(ctx, s.inputPath(task))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if len(infos) > 0 {
+			info = infos[0]
+		}
 	default:
 		return nil, nil
 	}

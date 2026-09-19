@@ -80,6 +80,23 @@ func TestMatch(t *testing.T) {
 		{"ep01.txt", "*.txt", true},
 		{"ep01.txtx", "*.txt", false},
 		{"ep01", "*.txt", false},
+
+		// A literal dot stays literal: only a dot immediately before a
+		// wildcard becomes DOS_DOT. `ntdll.dll` must not match `ntdllxdll`.
+		{"ntdll.dll", "ntdll.dll", true},
+		{"ntdllxdll", "ntdll.dll", false},
+		{"ep01.txt", "ep01*.txt", true},
+		{"ep01.txtx", "ep01*.txt", false},
+
+		// A stem that itself ends in a dot (the Cleaner builds the pattern
+		// from Path.GetFileNameWithoutExtension, so an input named
+		// `ep01...mkv` yields the pattern `ep01..*.*`). The extra dot is
+		// literal, which is what keeps the extension-less `ep01` safe.
+		{"ep01..mkv", "ep01..*.*", true},
+		{"ep01", "ep01..*.*", false},
+		{"ep01.mkv", "ep01..*.*", false},
+		{"ep01..txt", "ep01..*txt", true},
+		{"ep01.txt", "ep01..*txt", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.pattern+"/"+tt.name, func(t *testing.T) {

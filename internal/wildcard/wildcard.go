@@ -118,20 +118,36 @@ func Match(name, pattern string) bool {
 // translate replaces the wildcard characters with their DOS tokens, but only
 // when the pattern actually contains a wildcard. A pattern of pure literals
 // keeps its dots literal, so `ntdll.dll` does not match `ntdllxdll`.
+//
+// The translation follows TranslateWin32Expression, and the asymmetry is what
+// makes the trailing shapes behave: only a dot that sits immediately before a
+// `*` or `?` becomes DOS_DOT, so `ep01.txt` keeps a literal dot and cannot match
+// `ep01xtxt`, while `ep01.*txt` anchors on its dot. A dot directly after a star
+// at the very end of the pattern is folded away, because the star may already
+// match nothing there.
 func translate(pattern string) string {
-	if !strings.ContainsAny(pattern, `*?"<>`) {
+	if !strings.ContainsAny(pattern, `*?`) {
 		return pattern
 	}
+	rs := []rune(pattern)
 	var b strings.Builder
 	b.Grow(len(pattern))
-	for _, c := range pattern {
+	for i, c := range rs {
 		switch c {
 		case '*':
 			b.WriteRune(dosStar)
 		case '?':
 			b.WriteRune(dosQM)
 		case '.':
-			b.WriteRune(dosDot)
+			if i == len(rs)-1 && i >= 1 && rs[i-1] == '*' {
+				// Trailing "*.": the star written above already covers the dot.
+				continue
+			}
+			if i < len(rs)-1 && (rs[i+1] == '*' || rs[i+1] == '?') {
+				b.WriteRune(dosDot)
+			} else {
+				b.WriteRune('.')
+			}
 		default:
 			b.WriteRune(c)
 		}

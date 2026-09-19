@@ -88,6 +88,16 @@ func helperProbe(t *testing.T, fixture string) *Probe {
 	return &Probe{Tool: os.Args[0], Env: helperEnv(roleStdout, string(body))}
 }
 
+// helperMatroskaParser returns a Parser for the MKV path: the test binary
+// stands in for mkvextract (which the CLI cannot replace) and for the CLI
+// itself, replaying the given fixture as the CLI's answer.
+func helperMatroskaParser(t *testing.T, fixture string) *Parser {
+	t.Helper()
+	p := helperParser(t, fixture)
+	p.MkvExtract = os.Args[0]
+	return p
+}
+
 // fakeParser returns a Parser replaying an inline JSON document.
 func fakeParser(body string) *Parser {
 	return &Parser{Tool: os.Args[0], Env: helperEnv(roleStdout, body)}
@@ -907,7 +917,7 @@ func TestLoadChapterDeduplicatesMatroskaEndTimes(t *testing.T) {
 	task := newTask(input, 3_000_000)
 	task.Status.Chapter = model.ChapterMKV
 
-	s := &Service{Parser: helperParser(t, "tchapter_xml_endtimes.json")}
+	s := &Service{Parser: helperMatroskaParser(t, "tchapter_xml_endtimes.json")}
 	info, err := s.LoadChapter(t.Context(), task)
 	if err != nil {
 		t.Fatalf("LoadChapter() error = %v", err)
@@ -1136,7 +1146,14 @@ func TestLoadChapterFromMatroska(t *testing.T) {
 	task := newTask(input, 35_000)
 	task.Status.Chapter = model.ChapterMKV
 
-	s := &Service{Parser: helperParser(t, "tchapter_matroska.json")}
+	// The MKV path runs mkvextract and then the CLI, so the fake stands in for
+	// both: mkvextract prints the extracted XML, and the CLI (fed that XML
+	// through a temp file) prints the JSON.
+	s := &Service{Parser: &Parser{
+		Tool:       os.Args[0],
+		MkvExtract: os.Args[0],
+		Env:        helperEnv(roleStdout, `{"version":1,"format":"matroska_xml","entries":[{"title":"","source":"","fps_num":0,"fps_den":1,"duration_ns":0,"chapters":[{"name":"Chapter 01","time_ns":0,"frames":-1},{"name":"Chapter 02","time_ns":10000000000,"frames":-1},{"name":"Chapter 03","time_ns":20000000000,"frames":-1},{"name":"Chapter 04","time_ns":30000000000,"frames":-1}]}]}`),
+	}}
 	info, err := s.LoadChapter(t.Context(), task)
 	if err != nil {
 		t.Fatalf("LoadChapter() error = %v", err)
@@ -1146,6 +1163,79 @@ func TestLoadChapterFromMatroska(t *testing.T) {
 	}
 	if got := info.Count(); got != 4 {
 		t.Errorf("chapter count = %d, want 4", got)
+	}
+}
+
+// TestLoadChapterFromMatroskaNeedsMkvExtract pins the dependency: without an
+// mkvextract path the MKV branch must fail loudly rather than hand the raw
+// container to a CLI that cannot read EBML.
+func TestLoadChapterFromMatroskaNeedsMkvExtract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	input := filepath.Join(dir, "ep01.mkv")
+	writeFile(t, input)
+
+	task := newTask(input, 35_000)
+	task.Status.Chapter = model.ChapterMKV
+
+	s := &Service{Parser: helperParser(t, "tchapter_matroska.json")}
+	_, err := s.LoadChapter(t.Context(), task)
+	if err == nil {
+		t.Fatal("LoadChapter() = nil error, want a missing-mkvextract error")
+	}
+	if !strings.Contains(err.Error(), "mkvextract") {
+		t.Errorf("error = %v, want it to name mkvextract", err)
+	}
+}
+
+// TestLoadChapterFromMatroskaMissingBinaryIsAnError is the sharper form of the
+// check above: a configured path that does not exist must not be mistaken for
+// "the file has no chapters".
+func TestLoadChapterFromMatroskaMissingBinaryIsAnError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	input := filepath.Join(dir, "ep01.mkv")
+	writeFile(t, input)
+
+	task := newTask(input, 35_000)
+	task.Status.Chapter = model.ChapterMKV
+
+	s := &Service{Parser: &Parser{
+		Tool:       os.Args[0],
+		MkvExtract: filepath.Join(dir, "no-such-mkvextract.exe"),
+		Env:        helperEnv(roleStdout, ""),
+	}}
+	_, err := s.LoadChapter(t.Context(), task)
+	if err == nil {
+		t.Fatal("LoadChapter() = nil error, want the spawn failure to surface")
+	}
+}
+
+// TestLoadChapterFromMatroskaWithoutChapters covers a container that carries no
+// chapter track: mkvextract fails with nothing on stdout and the service must
+// treat that as "no chapters", not as an error.
+func TestLoadChapterFromMatroskaWithoutChapters(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	input := filepath.Join(dir, "ep01.mkv")
+	writeFile(t, input)
+
+	task := newTask(input, 35_000)
+	task.Status.Chapter = model.ChapterMKV
+
+	// Exit code 1 with an empty stdout is what mkvextract does when the file
+	// has no chapters.
+	s := &Service{Parser: &Parser{
+		Tool:       os.Args[0],
+		MkvExtract: os.Args[0],
+		Env:        append(helperEnv(roleStdout, ""), helperExitEnvVar+"=1"),
+	}}
+	info, err := s.LoadChapter(t.Context(), task)
+	if err != nil {
+		t.Fatalf("LoadChapter() error = %v, want nil for an empty chapter list", err)
+	}
+	if info != nil {
+		t.Errorf("LoadChapter() = %+v, want nil", info)
 	}
 }
 
@@ -1364,7 +1454,7 @@ func TestServiceUsesRoots(t *testing.T) {
 		Inputs: []model.FileRef{{Volume: "media", Rel: "/ep01.mkv"}},
 	}
 	s := &Service{
-		Parser: helperParser(t, "tchapter_matroska.json"),
+		Parser: helperMatroskaParser(t, "tchapter_matroska.json"),
 		Roots:  map[string]string{"media": dir},
 	}
 	task.Status.Chapter = model.ChapterMKV
