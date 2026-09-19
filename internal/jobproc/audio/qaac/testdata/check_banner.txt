@@ -1,0 +1,3 @@
+qaac 2.85, CoreAudioToolbox 7.10.9.0
+libsoxr-0.1.3
+libFLAC 1.4.3

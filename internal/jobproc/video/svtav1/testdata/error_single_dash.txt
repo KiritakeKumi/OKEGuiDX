@@ -1,0 +1,8 @@
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v4.2.0
+Svt[info]: SVT [build]  :	GCC 16.1.0	 64 bit
+Svt[info]: LIB Build date: Sep 19 2026 15:56:26
+Svt[info]: -------------------------------------------
+[SVT-Error]: single dash long tokens have been removed!
+Error in configuration, could not begin encoding! ... 
+Run C:\Users\KiritakeKumi\AppData\Local\Temp\svtb2\SVT-AV1-4.2.0\Bin\Release\SvtAv1EncApp.exe --help for a list of options

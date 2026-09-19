@@ -1,0 +1,7 @@
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v4.2.0
+Svt[info]: SVT [build]  :	GCC 16.1.0	 64 bit
+Svt[info]: LIB Build date: Sep 19 2026 15:56:26
+Svt[info]: -------------------------------------------
+Svt[error]: Only support 420 now 
+Svt[error]: Non 420 color format requires profile 1 or 2

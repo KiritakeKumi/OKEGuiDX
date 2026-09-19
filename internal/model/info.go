@@ -125,7 +125,9 @@ type AudioInfo struct {
 	// Quality is the QAAC VBR quality (0..127). nil means "use Bitrate".
 	Quality *int `json:"quality"`
 	Lossy   bool `json:"lossy"`
-	// Length is the source length in milliseconds, filled in after demux.
+	// Length is the container runtime in whole seconds, taken from the demuxer's
+	// header line. The reference computes it as hour*3600 + minute*60 + second,
+	// so it is seconds, not milliseconds.
 	Length int `json:"length"`
 }
 

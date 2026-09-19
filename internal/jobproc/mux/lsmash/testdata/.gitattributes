@@ -1,0 +1,6 @@
+# The fixtures are byte-exact captures of l-smash's stderr stream, and the
+# carriage returns inside the progress lines are part of what the parser has to
+# handle (see README.md). Disable end-of-line conversion for them so a checkout
+# on any platform keeps the bytes intact; the repository root sets
+# `* text=auto`, which would otherwise rewrite them.
+*.log -text

@@ -1,0 +1,7 @@
+# The fixtures are byte-exact captures of SvtAv1EncApp's stderr stream. The
+# progress records are separated by a bare carriage return and no newline, and
+# the fact that a scanner splitting on "\n" delivers them as one line is exactly
+# what svtav1.go's in-line scan exists for. Disable end-of-line conversion so a
+# checkout on any platform keeps the bytes intact; the repository root sets
+# `* text=auto`, which would otherwise rewrite them.
+*.txt -text

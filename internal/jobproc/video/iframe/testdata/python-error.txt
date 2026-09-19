@@ -1,0 +1,8 @@
+Failed to evaluate the script:
+Python exception: LWLibavSource: failed to open the file
+Traceback (most recent call last):
+  File "src\cython\vapoursynth.pyx", line 1841, in vapoursynth.vpy_evaluateScript
+  File "D:\BDMV\STREAM\ep01_iframe.vpy", line 4, in <module>
+    src = core.lsmas.LWLibavSource(a, cache=0, framelist=True)
+  File "src\cython\vapoursynth.pyx", line 1706, in vapoursynth.Function.__call__
+vapoursynth.Error: LWLibavSource: failed to open the file

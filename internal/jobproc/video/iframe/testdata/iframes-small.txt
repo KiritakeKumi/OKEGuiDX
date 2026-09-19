@@ -1,0 +1,14 @@
+Output Index: 0
+Type: Video
+Width: 320
+Height: 240
+Frames: 120
+FPS: 24/1 (24.000 fps)
+Format Name: YUV420P8
+Color Family: YUV
+Alpha: No
+Sample Type: Integer
+Bits: 8
+SubSampling W: 1
+SubSampling H: 1
+IFrameList: [0, 25, 49, 73, 97]

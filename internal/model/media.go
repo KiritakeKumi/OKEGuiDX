@@ -63,6 +63,11 @@ func (m *MediaFile) Tracks() []*Track {
 
 // AddTrack inserts a track in the slot implied by its concrete type. Adding a
 // second video or chapter track is an error, matching the legacy behaviour.
+//
+// The typed wrappers carry the track's codec metadata (an AudioTrack holds its
+// AudioInfo, a VideoTrack its VideoInfo). Prefer AddAudioTrack / AddVideoTrack
+// when that metadata is known: AddTrack can only fill in defaults, because a
+// bare Track carries the shared Info and nothing else.
 func (m *MediaFile) AddTrack(t *Track) error {
 	switch t.TrackType {
 	case TrackTypeVideo:
@@ -71,7 +76,7 @@ func (m *MediaFile) AddTrack(t *Track) error {
 		}
 		m.Video = &VideoTrack{Track: *t, Video: NewVideoInfo()}
 	case TrackTypeAudio:
-		m.AudioTracks = append(m.AudioTracks, &AudioTrack{Track: *t})
+		m.AudioTracks = append(m.AudioTracks, &AudioTrack{Track: *t, Audio: NewAudioInfo()})
 	case TrackTypeSubtitle:
 		m.SubtitleTracks = append(m.SubtitleTracks, &SubtitleTrack{Track: *t})
 	case TrackTypeChapter:
@@ -82,6 +87,29 @@ func (m *MediaFile) AddTrack(t *Track) error {
 	default:
 		return ErrUnknownTrackType
 	}
+	return nil
+}
+
+// NewAudioInfo returns an AudioInfo with the legacy defaults applied.
+func NewAudioInfo() AudioInfo {
+	return AudioInfo{Info: NewInfo()}
+}
+
+// AddAudioTrack appends an audio track, keeping the caller's codec metadata.
+func (m *MediaFile) AddAudioTrack(t *AudioTrack) error {
+	if t.TrackType != TrackTypeAudio {
+		return ErrUnknownTrackType
+	}
+	m.AudioTracks = append(m.AudioTracks, t)
+	return nil
+}
+
+// AddSubtitleTrack appends a subtitle track.
+func (m *MediaFile) AddSubtitleTrack(t *SubtitleTrack) error {
+	if t.TrackType != TrackTypeSubtitle {
+		return ErrUnknownTrackType
+	}
+	m.SubtitleTracks = append(m.SubtitleTracks, t)
 	return nil
 }
 

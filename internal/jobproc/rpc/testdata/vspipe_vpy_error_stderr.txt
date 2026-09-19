@@ -1,0 +1,9 @@
+Script evaluation failed:
+Python exception: No module named 'definitely_not_installed'
+
+Traceback (most recent call last):
+  File "src\cython\vapoursynth.pyx", line 1841, in vapoursynth.vpy_evaluateScript
+  File "err.vpy", line 3, in <module>
+    import definitely_not_installed
+ModuleNotFoundError: No module named 'definitely_not_installed'
+
