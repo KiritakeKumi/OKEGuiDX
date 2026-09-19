@@ -274,16 +274,15 @@ func (m *WorkerManager) beginStop() <-chan struct{} {
 	m.mu.Unlock()
 
 	for _, t := range targets {
-		if t.taskID.IsZero() {
-			continue
+		if !t.taskID.IsZero() {
+			m.cancelExecutorTask(t.taskID)
 		}
-		m.cancelExecutorTask(t.taskID)
-		// The legacy UI wrote "已终止" for every running task right after
-		// calling Stop (MainWindow.BtnStop_Click); the pool owns that now.
-		m.cancelTaskState(t.taskID)
 		if t.taskCancel != nil {
 			t.taskCancel()
 		}
+		// The worker context is cancelled even between tasks: it is the parent
+		// of the next task's context, and Stop must win the race against a
+		// worker that is about to claim one.
 		t.cancel()
 	}
 	return wait
@@ -434,8 +433,8 @@ func (m *WorkerManager) processTask(ctx context.Context, run *workerRun, task *m
 		// worker is on its way out, so the task goes straight to the state a
 		// stopped task has instead of being submitted.
 		taskCancel()
-		m.endTask(run)
 		m.cancelTaskState(task.ID)
+		m.endTask(run)
 		if err := m.tm.ReleaseInput(task); err != nil {
 			log.Warn("无法释放输入文件", "task", task.ID, "err", err)
 		}
@@ -455,6 +454,13 @@ func (m *WorkerManager) processTask(ctx context.Context, run *workerRun, task *m
 		m.handleEvent(run, ev)
 	}
 	taskCancel()
+	if m.takeCancelled(run) {
+		// The pool stopped this task, so the worker is the one that writes the
+		// legacy "已终止" state. Doing it here, after the executor's stream has
+		// closed, keeps a single writer per task: a late progress event can no
+		// longer overwrite the terminal state.
+		m.cancelTaskState(task.ID)
+	}
 	m.endTask(run)
 
 	// The legacy WorkerDoWork released the input file on every exit path, so a
@@ -462,6 +468,16 @@ func (m *WorkerManager) processTask(ctx context.Context, run *workerRun, task *m
 	if err := m.tm.ReleaseInput(task); err != nil {
 		log.Warn("无法释放输入文件", "task", task.ID, "err", err)
 	}
+}
+
+// takeCancelled reports whether the pool stopped the current task, clearing the
+// flag so the next task starts clean.
+func (m *WorkerManager) takeCancelled(run *workerRun) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cancelled := run.cancelled
+	run.cancelled = false
+	return cancelled
 }
 
 // beginTask records which task the worker is running and how to cancel it. It
@@ -785,8 +801,9 @@ func (m *WorkerManager) DeleteWorker(name string) bool {
 // the schedulable set, so its slot is free for a replacement; the worker itself
 // stays registered. Ported from WorkerManager.StopWorker.
 //
-// The legacy method only cancelled the BackgroundWorker; the pool also writes
-// the "已终止" state the UI used to write after calling Stop.
+// The worker goroutine writes the "已终止" state once its event stream closes,
+// which keeps a single writer per task: the legacy UI wrote it after calling
+// Stop, but a UI-side write races with a progress event still in flight.
 func (m *WorkerManager) StopWorker(name string) {
 	key := workerKey(name)
 
@@ -809,7 +826,6 @@ func (m *WorkerManager) StopWorker(name string) {
 	}
 	if !taskID.IsZero() {
 		m.cancelExecutorTask(taskID)
-		m.cancelTaskState(taskID)
 	}
 	if taskCancel != nil {
 		taskCancel()

@@ -773,7 +773,17 @@ func TestStopAllWorkerCancelsEveryTask(t *testing.T) {
 	if got := fake.cancelCount(); got != 3 {
 		t.Errorf("Cancel was called %d times, want 3", got)
 	}
-	waitFor(t, "every worker to leave the schedulable set", func() bool { return wm.GetBGWorkerCount() == 0 })
+	// The worker goroutine writes the terminal state once the executor's event
+	// stream has closed, so wait for the tasks rather than for the slot count:
+	// a stopped worker leaves the schedulable set before its task settles.
+	waitFor(t, "every stopped task to settle", func() bool {
+		for _, id := range ids {
+			if taskProgress(t, tm, id).Status.Progress == model.TaskRunning {
+				return false
+			}
+		}
+		return true
+	})
 	for _, id := range ids {
 		if got := taskProgress(t, tm, id).Status.Status; got != statusTerminated {
 			t.Errorf("task %s status = %q, want %q", id, got, statusTerminated)
@@ -922,12 +932,32 @@ func TestAfterFinishRunsOnlyOnFullSuccess(t *testing.T) {
 				fake.FinishAll()
 				return settled(tm) && !wm.IsRunning()
 			})
-			mu.Lock()
-			defer mu.Unlock()
-			if calls != tc.wantCalls {
-				t.Errorf("AfterFinish called %d times, want %d", calls, tc.wantCalls)
-			}
+			waitForAfterFinish(t, &calls, &mu, tc.wantCalls)
 		})
+	}
+}
+
+// waitForAfterFinish waits until the after-finish callback has run want times.
+// The callback runs on the last worker's goroutine right after the pool drains,
+// so a negative assertion cannot read the counter immediately: it allows a
+// short settle window first.
+func waitForAfterFinish(t *testing.T, calls *int, mu *sync.Mutex, want int) {
+	t.Helper()
+	deadline := time.Now().Add(testTimeout)
+	settle := time.Now().Add(200 * time.Millisecond)
+	for {
+		mu.Lock()
+		got := *calls
+		mu.Unlock()
+		if got == want {
+			if want > 0 || time.Now().After(settle) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("AfterFinish called %d times, want %d", got, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
