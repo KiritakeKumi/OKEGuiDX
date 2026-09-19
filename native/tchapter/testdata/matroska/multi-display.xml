@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Chapters>
+  <EditionEntry>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:10.000000000</ChapterTimeStart>
+      <ChapterDisplay>
+        <ChapterString>First</ChapterString>
+        <ChapterLanguage>jpn</ChapterLanguage>
+      </ChapterDisplay>
+      <ChapterDisplay>
+        <ChapterString>Second</ChapterString>
+        <ChapterLanguage>eng</ChapterLanguage>
+      </ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:20.000000000</ChapterTimeStart>
+      <ChapterDisplay>
+        <ChapterString>One</ChapterString>
+        <ChapterString>Two</ChapterString>
+        <ChapterLanguage>jpn</ChapterLanguage>
+      </ChapterDisplay>
+    </ChapterAtom>
+  </EditionEntry>
+</Chapters>

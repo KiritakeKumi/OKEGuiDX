@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Chapters>
+  <EditionEntry>
+    <EditionUID>1234567890</EditionUID>
+    <EditionFlagHidden>1</EditionFlagHidden>
+    <EditionFlagDefault>0</EditionFlagDefault>
+    <ChapterAtom>
+      <ChapterUID>1</ChapterUID>
+      <ChapterTimeStart>00:00:00.000000000</ChapterTimeStart>
+      <ChapterFlagHidden>1</ChapterFlagHidden>
+      <ChapterFlagEnabled>0</ChapterFlagEnabled>
+      <ChapterDisplay>
+        <ChapterString>Hidden</ChapterString>
+        <ChapterLanguage>eng</ChapterLanguage>
+      </ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterUID>2</ChapterUID>
+      <ChapterTimeStart>00:00:30.000000000</ChapterTimeStart>
+      <ChapterFlagHidden>0</ChapterFlagHidden>
+      <ChapterFlagEnabled>1</ChapterFlagEnabled>
+      <ChapterDisplay>
+        <ChapterString>Visible</ChapterString>
+        <ChapterLanguage>eng</ChapterLanguage>
+      </ChapterDisplay>
+    </ChapterAtom>
+  </EditionEntry>
+</Chapters>

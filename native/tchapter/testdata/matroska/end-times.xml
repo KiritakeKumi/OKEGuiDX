@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Chapters>
+  <EditionEntry>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:00.000000000</ChapterTimeStart>
+      <ChapterTimeEnd>00:11:20.000000000</ChapterTimeEnd>
+      <ChapterDisplay>
+        <ChapterString>Act 1</ChapterString>
+      </ChapterDisplay>
+      <ChapterAtom>
+        <ChapterTimeStart>00:00:00.000000000</ChapterTimeStart>
+        <ChapterTimeEnd>00:06:24.000000000</ChapterTimeEnd>
+        <ChapterDisplay>
+          <ChapterString>Piece 1</ChapterString>
+        </ChapterDisplay>
+      </ChapterAtom>
+      <ChapterAtom>
+        <ChapterTimeStart>00:06:24.000000000</ChapterTimeStart>
+        <ChapterDisplay>
+          <ChapterString>Piece 2</ChapterString>
+        </ChapterDisplay>
+      </ChapterAtom>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeEnd>00:28:26.000000000</ChapterTimeEnd>
+      <ChapterDisplay>
+        <ChapterString>Act 2 end only</ChapterString>
+      </ChapterDisplay>
+    </ChapterAtom>
+  </EditionEntry>
+</Chapters>

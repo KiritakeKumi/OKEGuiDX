@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Chapters>
+  <EditionEntry>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:00.000000000</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>NineDigits</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:01.500</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>Millis</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:02,250</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>Comma</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:03.1234</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>Micros</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>prefix 00:00:04.000 suffix</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>Surrounded</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>24:00:00.000</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>LongHour</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00 : 00 : 05 . 500</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>Spaced</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:06</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>NoFraction</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:07.12</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>ShortFraction</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+    <ChapterAtom>
+      <ChapterTimeStart>00:00:08.1234567890123</ChapterTimeStart>
+      <ChapterDisplay><ChapterString>LongFraction</ChapterString></ChapterDisplay>
+    </ChapterAtom>
+  </EditionEntry>
+</Chapters>

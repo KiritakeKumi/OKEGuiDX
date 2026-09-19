@@ -1,0 +1,5 @@
+CHAPTER01=00:00:00.000
+CHAPTER01NAME=Chapter 01
+this line is not a chapter at all
+CHAPTER02=00:00:10.000
+CHAPTER02NAME=Chapter 02
