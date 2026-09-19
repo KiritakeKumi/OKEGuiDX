@@ -506,6 +506,92 @@ static void test_keywords_are_case_sensitive(void) {
     }
 }
 
+/* The reference's \d matches every Unicode Nd character, and int.Parse then
+ * rejects the non-ASCII ones with a FormatException, so a non-ASCII digit makes
+ * the parse fail rather than being treated as ordinary text. */
+static void test_non_ascii_digits_are_rejected(void) {
+    static const char *const cases[] = {
+        /* Arabic-Indic digits in the track number. */
+        "FILE \"a.wav\" WAVE\r\n  TRACK \xD9\xA0\xD9\xA1 AUDIO\r\n    INDEX 01 00:00:00\r\n",
+        /* ... in the index. */
+        "FILE \"a.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX \xD9\xA0\xD9\xA1 00:00:00\r\n",
+        /* ... in each of the three time fields. */
+        "FILE \"a.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 01 \xD9\xA0\xD9\xA0:00:00\r\n",
+        "FILE \"a.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 01 00:\xD9\xA0\xD9\xA0:00\r\n",
+        "FILE \"a.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 01 00:00:\xD9\xA0\xD9\xA0\r\n",
+        /* Mixed ASCII and non-ASCII digits in one number. */
+        "FILE \"a.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    INDEX 1\xD9\xA1 00:00:00\r\n",
+        /* Fullwidth digits. */
+        "FILE \"a.wav\" WAVE\r\n  TRACK \xEF\xBC\x90\xEF\xBC\x91 AUDIO\r\n    INDEX 01 00:00:00\r\n",
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        tc_data *d = NULL;
+        TC_CHECK_EQ_INT(tc_parse_mem(cases[i], strlen(cases[i]), TC_FMT_CUE, "t.cue", &d),
+                        TC_E_FORMAT);
+        TC_CHECK(d == NULL);
+        TC_CHECK_CONTAINS(tc_last_error(), "not an ASCII number");
+    }
+
+    /* An INDEX 00 line is skipped before its time fields are parsed, so a
+     * non-ASCII digit there is harmless. */
+    const char *pregap =
+        "FILE \"a.wav\" WAVE\r\n"
+        "  TRACK 01 AUDIO\r\n"
+        "    INDEX 0 \xD9\xA0\xD9\xA0:\xD9\xA0\xD9\xA0:\xD9\xA0\xD9\xA0\r\n"
+        "    INDEX 01 00:00:00\r\n";
+    tc_data *d = NULL;
+    TC_CHECK_EQ_INT(tc_parse_mem(pregap, strlen(pregap), TC_FMT_CUE, "t.cue", &d), TC_OK);
+    if (d) {
+        TC_CHECK_EQ_INT(tc_chapter_count(d, 0), 1);
+        tc_free(d);
+    }
+}
+
+/* \d{2} consumes exactly two digits; a third digit is ordinary trailing text,
+ * which the unanchored regex tolerates. */
+static void test_extra_digits_are_trailing_text(void) {
+    const char *text =
+        "FILE \"a.wav\" WAVE\r\n"
+        "  TRACK 01 AUDIO\r\n"
+        "    INDEX 01 00:00:000\r\n";
+    tc_data *d = NULL;
+    TC_CHECK_EQ_INT(tc_parse_mem(text, strlen(text), TC_FMT_CUE, "t.cue", &d), TC_OK);
+    if (!d) {
+        return;
+    }
+    tc_chapter_t c;
+    TC_CHECK_EQ_INT(tc_chapter_at(d, 0, 0, &c), TC_OK);
+    TC_CHECK_EQ_INT(c.time_ns, 0);
+    tc_free(d);
+}
+
+/* A track number that does not fit in Int32 throws in the reference, and it
+ * throws as soon as the TRACK line matches rather than on the next line. */
+static void test_track_number_overflow(void) {
+    const char *text =
+        "FILE \"a.wav\" WAVE\r\n"
+        "  TRACK 01 AUDIO\r\n"
+        "    INDEX 01 00:00:00\r\n"
+        "  TRACK 2147483648 AUDIO\r\n";
+    tc_data *d = NULL;
+    TC_CHECK_EQ_INT(tc_parse_mem(text, strlen(text), TC_FMT_CUE, "t.cue", &d), TC_E_FORMAT);
+    TC_CHECK(d == NULL);
+    TC_CHECK_CONTAINS(tc_last_error(), "out of range");
+
+    /* Int32.MaxValue itself is fine. */
+    const char *ok =
+        "FILE \"a.wav\" WAVE\r\n"
+        "  TRACK 01 AUDIO\r\n"
+        "    INDEX 01 00:00:00\r\n"
+        "  TRACK 2147483647 AUDIO\r\n"
+        "    INDEX 01 00:02:00\r\n";
+    TC_CHECK_EQ_INT(tc_parse_mem(ok, strlen(ok), TC_FMT_CUE, "t.cue", &d), TC_OK);
+    if (d) {
+        TC_CHECK_EQ_INT(tc_chapter_count(d, 0), 2);
+        tc_free(d);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Error paths                                                        */
 /* ------------------------------------------------------------------ */
@@ -663,6 +749,9 @@ TC_SUITE(cue) {
     TC_CASE("disc_title");             test_title_before_file_is_the_disc_title();
     TC_CASE("file_keywords");          test_file_keywords();
     TC_CASE("case_sensitive");         test_keywords_are_case_sensitive();
+    TC_CASE("non_ascii_digits");       test_non_ascii_digits_are_rejected();
+    TC_CASE("extra_digits");           test_extra_digits_are_trailing_text();
+    TC_CASE("track_overflow");         test_track_number_overflow();
     TC_CASE("empty");                  test_empty_cue_file();
     TC_CASE("bad_index");              test_index_other_than_zero_or_one();
     TC_CASE("stray_index");            test_error_state_requires_a_track();

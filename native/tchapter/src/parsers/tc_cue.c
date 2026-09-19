@@ -232,6 +232,35 @@ static void cue_scan_digits(const char *s, size_t len, size_t *pos, size_t *coun
     *value = v;
 }
 
+/* Consumes exactly `want` decimal digits at *pos, as \d{2} does. Returns 1 when
+ * the digits were present. A third digit is left for the caller, so
+ * "00:00:000" matches with F = 00.
+ *
+ * `want` is always 2 here, so the value can never exceed Int32 and no overflow
+ * check is needed. */
+static int cue_scan_fixed_digits(const char *s, size_t len, size_t *pos, size_t want,
+                                 int *ascii, int64_t *value) {
+    size_t i = *pos;
+    int all_ascii = 1;
+    int64_t v = 0;
+    for (size_t k = 0; k < want; k++) {
+        size_t n = cue_digit_len(s + i, len - i);
+        if (n == 0) {
+            return 0;
+        }
+        if (n == 1) {
+            v = v * 10 + (s[i] - '0');
+        } else {
+            all_ascii = 0;
+        }
+        i += n;
+    }
+    *pos = i;
+    *ascii = all_ascii;
+    *value = v;
+    return 1;
+}
+
 /* ------------------------------------------------------------------ */
 /* Regex-equivalent matchers                                          */
 /* ------------------------------------------------------------------ */
@@ -375,22 +404,16 @@ static int cue_match_index(const char *line, size_t len, int64_t *index, int64_t
         }
         int64_t fields[3] = {0, 0, 0};
         int field_ascii = 1;
-        int field_overflow = 0;
         int matched = 1;
         for (int f = 0; f < 3 && matched; f++) {
-            size_t fcount = 0;
-            int fascii = 1, foverflow = 0;
+            int fascii = 1;
             int64_t fvalue = 0;
-            cue_scan_digits(line, len, &q, &fcount, &fascii, &foverflow, &fvalue);
-            if (fcount != 2) {
+            if (!cue_scan_fixed_digits(line, len, &q, 2, &fascii, &fvalue)) {
                 matched = 0;
                 break;
             }
             if (!fascii) {
                 field_ascii = 0;
-            }
-            if (foverflow) {
-                field_overflow = 1;
             }
             fields[f] = fvalue;
             if (f < 2) {
@@ -411,14 +434,9 @@ static int cue_match_index(const char *line, size_t len, int64_t *index, int64_t
         if (overflow) {
             return -1;
         }
-        if (idx == 1) {
+        if (idx == 1 && !field_ascii) {
             /* int.Parse runs on M, S and F only in this branch. */
-            if (!field_ascii) {
-                return -2;
-            }
-            if (field_overflow) {
-                return -1;
-            }
+            return -2;
         }
         /* Math.Round(frames * (1000F / 75)); frames is 0..99, so the rounding
          * never lands exactly halfway and integer arithmetic is exact. */

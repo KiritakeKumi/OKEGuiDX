@@ -275,7 +275,7 @@ static void test_timecode_forms(void) {
     TC_CHECK_EQ_INT(chapter_time(d, 0, 2), 2250000000LL); /* comma separator */
     /* ".1234" is 123.4 ms, which the reference's double arithmetic keeps to the
      * tick; truncating to three digits would lose the 0.4 ms. */
-    TC_CHECK_EQ_INT(chapter_time(d, 0, 3), 1234000000LL + 1890000000LL);
+    TC_CHECK_EQ_INT(chapter_time(d, 0, 3), 3123400000LL);
     TC_CHECK_EQ_INT(chapter_time(d, 0, 4), 4000000000LL); /* unanchored match */
     TC_CHECK_EQ_INT(chapter_time(d, 0, 5), 5500000000LL); /* padded separators */
     TC_CHECK_EQ_INT(chapter_time(d, 0, 6), 5940000000000LL);

@@ -195,6 +195,9 @@ func (f *samplesField) UnmarshalJSON(data []byte) error {
 // rpcFile is the on-disk envelope RpChecker wrote: a one-element array holding
 // one result object. It is the shape used for decoding, where the number of
 // tuple members is not known up front.
+//
+// The two typed envelopes below are what the encoder writes; they exist so
+// that Go emits exactly the member set Newtonsoft did.
 type rpcFile struct {
 	Data         samplesField `json:"Data"`
 	FileNamePair wirePair     `json:"FileNamePair"`

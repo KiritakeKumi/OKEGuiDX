@@ -23,9 +23,16 @@ INCDIR   := include
 # exactly one file and the source list never has to be edited by hand.
 SRCS := $(wildcard $(SRCDIR)/*.c) $(wildcard $(SRCDIR)/parsers/*.c)
 # The test runner has its own main(); it is linked into the test binary only.
-LIB_SRCS := $(filter-out $(SRCDIR)/tc_test_main.c,$(SRCS))
+# The library excludes every test translation unit. Filtering out only the
+# runner would leave the suites themselves linked into libtchapter.a, so anyone
+# linking the library would also get the test code and its registration
+# constructors.
+LIB_SRCS := $(filter-out $(SRCDIR)/tc_test_main.c,$(filter-out $(wildcard $(SRCDIR)/tc_test_*.c),$(SRCS)))
 LIB_OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(LIB_SRCS))
-TEST_SRCS := $(wildcard $(SRCDIR)/tc_test_main.c) $(wildcard $(SRCDIR)/tc_test_*.c)
+# The main file is listed separately because the wildcard below also matches it,
+# which would link two definitions of main.
+TEST_SRCS := $(wildcard $(SRCDIR)/tc_test_main.c) \
+             $(filter-out $(SRCDIR)/tc_test_main.c,$(wildcard $(SRCDIR)/tc_test_*.c))
 TEST_OBJS := $(patsubst $(SRCDIR)/%.c,$(OBJDIR)/%.o,$(TEST_SRCS))
 
 LIB_STATIC := $(OBJDIR)/libtchapter.a
@@ -61,6 +68,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
 	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) -c $< -o $@
 
 $(LIB_STATIC): $(LIB_OBJS)
+	@rm -f $@
 	$(AR) rcs $@ $^
 
 $(LIB_SHARED): $(LIB_OBJS)

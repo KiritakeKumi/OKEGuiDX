@@ -7,9 +7,9 @@
 //
 // Two deliberate deviations, both required to make the result useful:
 //
-//   - The legacy code passed `.` as the output file, which on Windows means
-//     "write nothing". vspipe's stdout is redirected to the null device by the
-//     process layer instead, which behaves identically on every platform.
+//   - The legacy code passed `.` as the output file, which tells vspipe to
+//     consume every frame without writing any of them; vspipe's stdout is
+//     drained and discarded here, which is the same thing on every platform.
 //   - A non-zero vspipe exit becomes a structured error. The legacy code
 //     ignored it and reported a "pass" whenever the run happened to end with
 //     an "Output ..." line, so a crashed script could still be recorded as
@@ -93,7 +93,6 @@ type Processor struct {
 	script   string
 	result   Result
 	frameErr error
-	started  bool
 }
 
 // New returns a Processor for the given options.
@@ -149,7 +148,6 @@ func (p *Processor) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 	}
 	p.mu.Lock()
 	p.script = script
-	p.started = true
 	p.mu.Unlock()
 
 	// The legacy command line was `"<script>" .`, where `.` tells vspipe to
@@ -179,13 +177,20 @@ func (p *Processor) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 	}()
 
 	// The template prints RPCOUT lines to stderr and vspipe writes its own
-	// diagnostics there too, so only stderr is parsed; stdout is drained and
-	// discarded because `.` makes it empty anyway.
+	// diagnostics there too, so only stderr is parsed. stdout is drained
+	// concurrently: `.` normally makes it empty, but a script that prints
+	// would otherwise fill the pipe and deadlock the child.
 	handler := p.lineHandler()
+	var drainWG sync.WaitGroup
+	drainWG.Add(1)
+	go func() {
+		defer drainWG.Done()
+		if drainErr := drain(process.Stdout()); drainErr != nil {
+			log.Debug("丢弃vspipe输出失败", "err", drainErr)
+		}
+	}()
 	runErr := process.FinishStderr(handler)
-	if drainErr := drain(process.Stdout()); drainErr != nil {
-		log.Debug("丢弃vspipe输出失败", "err", drainErr)
-	}
+	drainWG.Wait()
 
 	if ctx.Err() != nil {
 		return okerr.Wrap(ctx.Err(), okerr.KindCanceled, "任务已取消", "vspipe 已被终止")
@@ -281,10 +286,14 @@ func (p *Processor) outputPath() string {
 	return strings.ReplaceAll(out, ".rpc", "-"+status.String()+".rpc")
 }
 
-// writeResult serializes the collected samples next to the encoded file.
+// writeResult serializes the collected samples.
 //
-// The choice of layout mirrors RpChecker.waitForFinish: a Y-only run (any
-// two-field sample) writes RpcResult, everything else writes RpcResult3.
+// The layout mirrors RpChecker.waitForFinish exactly: it wrote RpcResult when
+// its two-field list was non-empty and RpcResult3 otherwise. With a
+// homogeneous run that is the same as "two-field lines were seen". The one
+// case the legacy code could not represent -- a run that produced both shapes,
+// which the template cannot actually do -- is written as four-field here
+// rather than dropping the chroma samples.
 func (p *Processor) writeResult() error {
 	p.mu.Lock()
 	res := p.result
@@ -292,8 +301,8 @@ func (p *Processor) writeResult() error {
 	path := p.outputPath()
 	p.mu.Unlock()
 
-	// The legacy code never assigned FileNamePair on the YUV path, so it was
-	// serialized as nulls; only the Y-only path carried the pair.
+	// FileNamePair was only ever assigned on the RpcResult instance, so it is
+	// present in the two-field layout and null in the four-field one.
 	yuv := res.YUV || len(res.Samples) == 0
 	if yuv {
 		res.FileNamePair = nil

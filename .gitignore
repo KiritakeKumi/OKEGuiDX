@@ -270,3 +270,6 @@ native/tchapter/out.txt
 # clone would be missing them. Negate the rule for testdata only.
 !**/testdata/**/*.log
 !**/testdata/**/*.txt
+
+# Sanitizer output and other transient debugging artifacts.
+asan_out.txt

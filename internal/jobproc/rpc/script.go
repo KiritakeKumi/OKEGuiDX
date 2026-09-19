@@ -30,10 +30,10 @@ func ScriptPath(rippedFile string) string {
 // ArgsClauses renders the `setattr(mod, 'key', b'value')` lines for the
 // profile's vspipe arguments.
 //
-// RpcJob split each `key=value` at the first '='; the map iteration order is
-// not preserved here because the template only cares that every argument is
-// set before the module is executed. Values are emitted as byte literals with
-// their backslashes escaped, mirroring the legacy `b'{value}'` interpolation.
+// RpcJob split each `key=value` at the first '=' and stored the pairs in a
+// dictionary. Dictionary order is not observable in the generated script --
+// every clause just has to run before loader.exec_module -- so the caller's
+// order is used. Values are emitted as Python byte literals.
 func ArgsClauses(args []string) string {
 	var b strings.Builder
 	for _, arg := range args {
@@ -44,15 +44,18 @@ func ArgsClauses(args []string) string {
 			// failing the whole task on it.
 			continue
 		}
-		fmt.Fprintf(&b, "setattr(mod, '%s', b'%s')%s", key, escapePyString(value), "\n")
+		fmt.Fprintf(&b, "setattr(mod, '%s', b'%s')\n", key, escapePyString(value))
 	}
 	return b.String()
 }
 
-// ScriptContent fills RpcTemplate.vpy in for one run. The order of the
-// replacements matters: a source path that happens to contain the literal
-// "OKE:VIDEO_FILE" would otherwise be rewritten by the later passes, so the
-// legacy order (source, video, args) is kept.
+// ScriptContent fills RpcTemplate.vpy in for one run.
+//
+// The replacement order is the legacy order (source, then video, then args),
+// which is observable: a source path that itself contains the literal
+// "OKE:VIDEO_FILE" gets rewritten by the second pass. That is what
+// RpChecker.GetRpcScript did, and it is preserved rather than "fixed" -- the
+// substituted text is a path, and a real path never contains the marker.
 func ScriptContent(template, sourceScript, videoFile string, args []string) string {
 	content := template
 	content = strings.ReplaceAll(content, placeholderSource, sourceScript)
