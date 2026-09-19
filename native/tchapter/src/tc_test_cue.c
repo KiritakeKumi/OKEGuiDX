@@ -320,6 +320,39 @@ static void test_tracks_are_sorted_by_number(void) {
     tc_free(d);
 }
 
+/* Duplicate track numbers are the one place where the reference is not
+ * deterministic: List.Sort is unstable, so .NET Framework and .NET Core order
+ * equal keys differently. The port uses a stable sort and keeps the file order;
+ * what matters is that the result is still sorted and that the last chapter
+ * (the highest track number) supplies the duration. */
+static void test_duplicate_track_numbers(void) {
+    const char *text =
+        "FILE \"a.wav\" WAVE\r\n"
+        "  TRACK 02 AUDIO\r\n"
+        "    TITLE \"b\"\r\n"
+        "    INDEX 01 00:02:00\r\n"
+        "  TRACK 01 AUDIO\r\n"
+        "    TITLE \"a\"\r\n"
+        "    INDEX 01 00:01:00\r\n"
+        "  TRACK 02 AUDIO\r\n"
+        "    TITLE \"c\"\r\n"
+        "    INDEX 01 00:03:00\r\n";
+    tc_data *d = NULL;
+    TC_CHECK_EQ_INT(tc_parse_mem(text, strlen(text), TC_FMT_CUE, "t.cue", &d), TC_OK);
+    if (!d) {
+        return;
+    }
+    TC_CHECK_EQ_INT(tc_chapter_count(d, 0), 3);
+    /* Track 1 comes first; the two track 2 chapters keep their file order. */
+    expect_chapter(d, 0, "a", 1000);
+    expect_chapter(d, 1, "b", 2000);
+    expect_chapter(d, 2, "c", 3000);
+    tc_entry_info_t ei;
+    TC_CHECK_EQ_INT(tc_entry_info(d, 0, &ei), TC_OK);
+    TC_CHECK_EQ_INT(ei.duration_ns, 3000000000LL);
+    tc_free(d);
+}
+
 /* A track whose INDEX 01 never appears is not a chapter in the reference. */
 static void test_track_without_index_is_dropped(void) {
     tc_data *d = parse_fixture("cue-dropped.cue");
@@ -740,6 +773,7 @@ TC_SUITE(cue) {
     TC_CASE("utf8_replacements");      test_utf8_replacement_rules();
     TC_CASE("minimal");                test_minimal_sheet();
     TC_CASE("sorted_tracks");          test_tracks_are_sorted_by_number();
+    TC_CASE("duplicate_tracks");       test_duplicate_track_numbers();
     TC_CASE("dropped_track");          test_track_without_index_is_dropped();
     TC_CASE("no_final_newline");       test_missing_final_newline();
     TC_CASE("performer");              test_performer_appends_to_name();

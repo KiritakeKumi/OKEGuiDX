@@ -21,6 +21,11 @@
  *    Shift_JIS or GBK detection, so neither has this port: a SJIS or GBK cue
  *    sheet loses its non-ASCII text to replacement characters in both
  *    implementations.
+ *
+ *  - The chapters are sorted with List.Sort, which is unstable. When two tracks
+ *    share a number the reference therefore returns them in an unspecified
+ *    order that differs between .NET Framework and .NET Core. This port uses a
+ *    stable sort instead, so the result is deterministic.
  */
 #include <stdlib.h>
 #include <string.h>
@@ -835,7 +840,10 @@ done: {
     }
 
     /* The original sorts the chapters by track number before reporting them.
-     * Insertion sort keeps equal numbers in file order. */
+     * List.Sort is unstable, so tracks that share a number come out in an
+     * unspecified order that differs between .NET Framework and .NET Core; a
+     * stable sort is used here instead, which keeps the file order for equal
+     * numbers and makes the result deterministic. */
     for (size_t i = 1; i < count; i++) {
         cue_track key = tracks[i];
         size_t j = i;

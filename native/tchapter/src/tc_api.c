@@ -79,8 +79,11 @@ tc_format tc_detect_from_file(const char *path) {
         return TC_FMT_AUTO;
     }
 
-    unsigned char head[64];
-    size_t n = read_head(path, head, sizeof(head));
+    unsigned char head[64 + 1];
+    size_t n = read_head(path, head, sizeof(head) - 1);
+    /* The text checks below use NUL-terminated helpers, so the buffer needs a
+     * terminator that the file cannot forge. */
+    head[n] = '\0';
 
     if (n >= 8 && memcmp(head, "MPLS", 4) == 0) {
         return TC_FMT_MPLS;
@@ -111,12 +114,12 @@ tc_format tc_detect_from_file(const char *path) {
         if (n >= 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF) {
             off = 3;
         }
-        if (n - off >= 6 && strncmp(s + off, "WEBVTT", 6) == 0) {
+        if (n - off >= 6 && memcmp(s + off, "WEBVTT", 6) == 0) {
             return TC_FMT_VTT;
         }
-        if (n - off >= 4 && strncmp(s + off, "# time", 6) == 0) {
-            /* A timecode file; not a chapter format, but recognised so the
-             * caller gets a clear error instead of a wrong parse. */
+        /* A timecode file is not a chapter format, but it is recognised so the
+         * caller gets a clear error instead of a wrong parse. */
+        if (n - off >= 6 && memcmp(s + off, "# time", 6) == 0) {
             return TC_FMT_AUTO;
         }
         /* OGM chapter text begins with a [CHAPTER] section header. */
