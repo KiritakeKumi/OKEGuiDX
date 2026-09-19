@@ -273,3 +273,7 @@ native/tchapter/out.txt
 
 # Sanitizer output and other transient debugging artifacts.
 asan_out.txt
+
+# Built CLI binaries on Windows.
+/okegui.exe
+/okeguidx.exe
