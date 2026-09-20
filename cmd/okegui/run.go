@@ -264,7 +264,14 @@ func loadTasks(paths []string, caps node.Capabilities) ([]loadedTask, error) {
 		// Each row needs its own id: profile.ToModel assigned one to the base,
 		// and the queue rejects a second task with an id it already holds, so a
 		// profile with several sources would otherwise queue only its first.
-		for _, input := range p.InputFiles {
+		//
+		// A profile keeps its InputFiles as written, which is usually relative
+		// to the profile (LoadInputFiles did the same). They are resolved here,
+		// because everything downstream — the working tree, the timecode, the
+		// demuxer — needs an absolute path.
+		dir := filepath.Dir(p.ConfigFilePath)
+		for _, raw := range p.InputFiles {
+			input := resolveFrom(dir, raw)
 			task := *base
 			task.ID = model.NewTaskID()
 			task.Inputs = []model.FileRef{model.NewFileRef(input)}

@@ -160,6 +160,14 @@ func ToModel(p *Profile, cfg *EpisodeConfig) *model.Task {
 	if cfg != nil {
 		t.Config = cfg
 	}
+	// The inputs are echoed as the profile wrote them, which is usually a path
+	// relative to the profile's own directory. This package cannot resolve
+	// them: it never sees a file system, and the legacy code resolved against
+	// the json directory in AddTaskService.LoadInputFiles, one layer up. Every
+	// caller must therefore replace Inputs and Status.Input with resolved
+	// absolute paths before the task reaches the queue, which is what the API's
+	// selectInput and the CLI's loadTasks do. A relative value left here would
+	// resolve against the process working directory instead.
 	for _, in := range p.InputFiles {
 		t.Inputs = append(t.Inputs, model.NewFileRef(in))
 	}

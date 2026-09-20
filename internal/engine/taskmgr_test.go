@@ -1400,11 +1400,19 @@ func TestSnapshotIsIndependent(t *testing.T) {
 	m := newTestManager(t, Options{})
 	task := addTestTask(t, m, "ep01", "D:/media/ep01.m2ts")
 
+	// Compare against a reference built the same way, not against a path
+	// spelled out here: the point is that the snapshot is a deep copy, and a
+	// hardcoded expectation would also fail on an unrelated path change.
+	wantInput := model.NewFileRef("D:/media/ep01.m2ts")
 	snap := m.Snapshot()
 	snap[0].Name = "mutated"
 	snap[0].Inputs[0] = model.NewFileRef("D:/media/other.m2ts")
-	if got, _ := m.Task(task.ID); got.Name != "ep01" || got.Inputs[0].Rel != "/media/ep01.m2ts" {
-		t.Errorf("queue was mutated through the snapshot: %+v", got)
+	got, _ := m.Task(task.ID)
+	if got.Name != "ep01" {
+		t.Errorf("Name was mutated through the snapshot: %q", got.Name)
+	}
+	if len(got.Inputs) != 1 || got.Inputs[0] != wantInput {
+		t.Errorf("Inputs were mutated through the snapshot: %+v, want [%+v]", got.Inputs, wantInput)
 	}
 }
 

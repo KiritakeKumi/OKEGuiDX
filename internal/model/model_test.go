@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ func TestNewFileRefNormalizesSeparators(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"windows absolute", `D:\WORKS\ep01\00000.m2ts`, "/WORKS/ep01/00000.m2ts"},
+		{"windows absolute", `D:\WORKS\ep01\00000.m2ts`, "/D:/WORKS/ep01/00000.m2ts"},
 		{"windows relative", `Main_Disc\BDMV\STREAM\00000.m2ts`, "/Main_Disc/BDMV/STREAM/00000.m2ts"},
 		{"unix absolute", "/mnt/media/ep01/00000.m2ts", "/mnt/media/ep01/00000.m2ts"},
 		{"bare name", "00000.m2ts", "/00000.m2ts"},
@@ -35,13 +36,56 @@ func TestNewFileRefNormalizesSeparators(t *testing.T) {
 
 func TestFileRefResolveIsIdentityOnLocalVolume(t *testing.T) {
 	t.Parallel()
-	// In standalone mode the local volume root is the filesystem root, so
+	// In standalone mode the local volume root carries no prefix of its own, so
 	// resolving must give back the path the user typed. This is what makes the
 	// FileRef indirection invisible on a single machine.
+	//
+	// On Windows the root is empty because the drive belongs to each path; on
+	// Unix it is the filesystem root. Both must round-trip.
 	ref := NewFileRef(`D:\WORKS\okgui\ep01\00000.m2ts`)
-	roots := map[string]string{LocalVolume: `D:\`}
-	got := ref.Resolve(roots)
-	want := filepath.Join(`D:\`, "WORKS", "okgui", "ep01", "00000.m2ts")
+	want := filepath.FromSlash("D:/WORKS/okgui/ep01/00000.m2ts")
+	for _, root := range []string{"", `D:\`} {
+		roots := map[string]string{LocalVolume: root}
+		if got := ref.Resolve(roots); got != want {
+			t.Errorf("Resolve(root=%q) = %q, want %q", root, got, want)
+		}
+	}
+}
+
+// TestFileRefResolveKeepsDriveLetter is the regression test for the bug where
+// the drive was dropped, so every downstream stage looked for the source under
+// a path on the current drive instead of the one the user gave.
+func TestFileRefResolveKeepsDriveLetter(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"windows absolute", `D:\a\b\ep01.mkv`, `D:\a\b\ep01.mkv`},
+		{"windows other drive", `C:\a\b\ep01.mkv`, `C:\a\b\ep01.mkv`},
+		{"unix absolute", "/a/b/ep01.mkv", "/a/b/ep01.mkv"},
+		{"bare name", "ep01.mkv", "/ep01.mkv"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			want := filepath.FromSlash(strings.ReplaceAll(tc.want, `\`, "/"))
+			if got := NewFileRef(tc.in).ResolveLocal(""); got != want {
+				t.Errorf("NewFileRef(%q).ResolveLocal(\"\") = %q, want %q", tc.in, got, want)
+			}
+		})
+	}
+}
+
+// TestFileRefDriveWinsOverRoot pins the rule that a drive-qualified reference
+// is not prefixed with a volume root: the drive is per path, so prefixing one
+// would produce a path like "E:\mnt\D:\a".
+func TestFileRefDriveWinsOverRoot(t *testing.T) {
+	t.Parallel()
+	ref := NewFileRef(`D:\a\b\ep01.mkv`)
+	got := ref.Resolve(map[string]string{LocalVolume: `E:\mnt`})
+	want := filepath.FromSlash("D:/a/b/ep01.mkv")
 	if got != want {
 		t.Errorf("Resolve() = %q, want %q", got, want)
 	}

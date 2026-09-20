@@ -108,10 +108,23 @@ func (r FileRef) Resolve(roots map[string]string) string {
 		root = roots[LocalVolume]
 	}
 	rel := strings.ReplaceAll(r.Rel, "/", string(filepath.Separator))
+	// A drive-qualified Rel is already the whole path: the drive is per path,
+	// not per volume, so no root can be prefixed without duplicating it.
+	if driveQualified(rel) {
+		return strings.TrimPrefix(rel, string(filepath.Separator))
+	}
 	if root == "" {
 		return rel
 	}
 	return filepath.Join(root, rel)
+}
+
+// driveQualified reports whether an OS path starts with a Windows drive letter,
+// such as `D:\a\b`. The leading separator is skipped because normalizeRel keeps
+// one in front of the drive.
+func driveQualified(path string) bool {
+	p := strings.TrimPrefix(path, string(filepath.Separator))
+	return len(p) >= 2 && p[1] == ':'
 }
 
 // ResolveLocal resolves the reference against a single local root. Convenience
@@ -144,10 +157,13 @@ func (r *FileRef) UnmarshalText(b []byte) error {
 
 func normalizeRel(path string) string {
 	p := strings.ReplaceAll(path, "\\", "/")
-	// Collapse any Windows volume prefix ("C:/foo") to "/foo" so that the
-	// local volume root can be a drive letter without duplicating it.
+	// Keep a Windows drive letter instead of collapsing it. The local volume's
+	// root is empty on Windows, because the drive belongs to each path rather
+	// than to the volume, so Rel has to carry it for Resolve to rebuild an
+	// absolute path. Cluster volumes, whose root is a real mount point, do not
+	// reach this branch: their paths are rooted and carry no drive.
 	if len(p) >= 2 && p[1] == ':' {
-		p = p[2:]
+		p = "/" + p
 	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p

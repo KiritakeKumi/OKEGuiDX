@@ -564,7 +564,7 @@ func TestOutputRef(t *testing.T) {
 			container: "MKV",
 			input:     `D:\work\00000.m2ts`,
 			wantBase:  "00000.m2ts.mkv",
-			wantDir:   "local/work",
+			wantDir:   "local/D:/work",
 		},
 		{
 			name:      "mp4 is lowercased",
