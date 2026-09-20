@@ -415,6 +415,67 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+// TestEpisodeArgsAreIndependentOfTheBuilder hardcodes the complete command line
+// instead of calling the builder the way TestBuildArgs does. The tokens are
+// transcribed from the legacy NewMkvEpisodeMuxer.BuildCommandline
+// (JobProcessor/Muxer/NewMkvEpisodeMuxer.cs): the video file is grouped in
+// parentheses with its per-track options and gets a --timestamps option when a
+// timecode file is present, every audio and subtitle file is preceded by the
+// --no-track-tags --no-global-tags pair, the Default audio track is the only
+// default one, and the chapter options and --track-order close the line.
+//
+// TestBuildArgs spells its paths with localPath, which is NewFileRef().ResolveLocal:
+// the expected argv and the argv under test share the code path, so a regression
+// in FileRef.ResolveLocal leaves that test green. This test carries the paths as
+// literals with real drive letters, so only the builder can change them.
+func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
+	t.Parallel()
+
+	media := &model.MediaFile{
+		Video: videoTrack(`V:\media\ep01\v.hevc`, `V:\media\ep01\ep01.v2.tcfile`),
+		AudioTracks: []*model.AudioTrack{
+			audioTrack(`V:\media\ep01\a1.flac`, model.MuxOptionDefault, "jpn", "Main", 0),
+			audioTrack(`V:\media\ep01\a2.flac`, model.MuxOptionMka, "eng", "Commentary", 1),
+			audioTrack(`V:\media\ep01\a3.flac`, model.MuxOptionExternal, "jpn", "Ext", 2),
+			audioTrack(`V:\media\ep01\a4.flac`, model.MuxOptionExtractOnly, "jpn", "", 3),
+			audioTrack(`V:\media\ep01\a5.flac`, model.MuxOptionSkip, "jpn", "", 4),
+		},
+		SubtitleTracks: []*model.SubtitleTrack{
+			subtitleTrack(`V:\media\ep01\s1.ass`, model.MuxOptionDefault, "jpn", "", 0),
+			subtitleTrack(`V:\media\ep01\s2.ass`, model.MuxOptionMka, "eng", "Signs", 1),
+		},
+		Chapter: chapterTrack(`V:\media\ep01\ep01.txt`, "jpn"),
+	}
+	got := BuildArgs(Options{
+		Mkvmerge: `C:\tools\mkvtoolnix\mkvmerge.exe`,
+		Output:   `V:\out\ep01.mkv`,
+		Media:    media,
+	})
+	want := []string{
+		"--ui-language", "en",
+		"--output", `V:\out\ep01.mkv`,
+		"--timestamps", `0:V:\media\ep01\ep01.v2.tcfile`,
+		"--default-track", "0:1",
+		"--language", "0:und",
+		"--track-name", "0:",
+		"(", `V:\media\ep01\v.hevc`, ")",
+		"--no-track-tags", "--no-global-tags",
+		"--default-track", "0:1",
+		"--language", "0:jpn",
+		"--track-name", "0:Main",
+		"(", `V:\media\ep01\a1.flac`, ")",
+		"--no-track-tags", "--no-global-tags",
+		"--default-track", "0:0",
+		"--language", "0:jpn",
+		"--track-name", "0:",
+		"(", `V:\media\ep01\s1.ass`, ")",
+		"--chapter-language", "jpn",
+		"--chapters", `V:\media\ep01\ep01.txt`,
+		"--track-order", "0:0,1:0,2:0",
+	}
+	assertArgs(t, got, want)
+}
+
 // TestParseLineClassification pins the line classifier, including the two
 // quirks of the legacy implementation: the threshold on progress values and the
 // fixed offset used for the error detail.

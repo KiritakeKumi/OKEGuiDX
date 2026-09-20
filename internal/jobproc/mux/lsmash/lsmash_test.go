@@ -160,6 +160,46 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
+// TestEpisodeArgsAreIndependentOfTheBuilder hardcodes the complete command line
+// instead of resolving the inputs through EpisodeOptions the way TestBuildArgs
+// does. The tokens are transcribed from the legacy
+// NewMp4EpisodeMuxer.BuildCommandline
+// (JobProcessor/Muxer/NewMp4EpisodeMuxer.cs): the global options come first,
+// then one -i per input in mux order -- video with its fps= option, then audio
+// ordered by Info.Order with language= and handler= always present -- and the
+// chapter file last.
+//
+// TestEpisodeOptionsSelectsAndOrdersTracks spells its paths with resolveLocal,
+// which is NewFileRef().Resolve: the expected argv and the argv under test share
+// the code path, so a regression in FileRef.Resolve leaves that test green. This
+// test carries the paths as literals with real drive letters, so only the builder
+// can change them.
+func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
+	t.Parallel()
+
+	media := &model.MediaFile{
+		Video: videoTrack(`V:\media\ep01\v.hevc`, 24000, 1001),
+		AudioTracks: []*model.AudioTrack{
+			// The unsupported .flac and .wav inputs are dropped, the .aac one
+			// survives, and Info.Order puts it before the slice position of
+			// the dropped entries.
+			audioTrackAt(`V:\media\ep01\a1.flac`, "jpn", "Main", 1),
+			audioTrackAt(`V:\media\ep01\a2.aac`, "eng", "Commentary", 2),
+			audioTrack(`V:\media\ep01\a3.wav`, "jpn", ""),
+		},
+		Chapter: chapterTrack(`V:\media\ep01\ep01.txt`),
+	}
+	got := BuildArgs(EpisodeOptions(`C:\tools\l-smash\muxer.exe`, `V:\out\ep01.mp4`, media, 0, rootsLocal))
+	want := []string{
+		"--file-format", "mp4",
+		"-o", `V:\out\ep01.mp4`,
+		"-i", `V:\media\ep01\v.hevc?fps=24000/1001`,
+		"-i", `V:\media\ep01\a2.aac?language=eng,handler=Commentary`,
+		"--chapter", `V:\media\ep01\ep01.txt`,
+	}
+	assertArgs(t, got, want)
+}
+
 func TestEpisodeOptionsSelectsAndOrdersTracks(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
