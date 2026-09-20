@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 )
 
 // AppDirName is the per-user directory that holds OKEGuiDX state. It replaces
@@ -100,7 +101,10 @@ func LoadConfig() (Config, error) {
 
 func loadConfigFile(path string) (Config, error) {
 	cfg := DefaultConfig()
-	raw, err := os.ReadFile(path)
+	// The legacy Initializer read the config with File.ReadAllText, so a byte
+	// order mark left by an editor was consumed. The settings file is one
+	// operators hand-edit, so the same tolerance is required here.
+	raw, err := textfile.Read(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil

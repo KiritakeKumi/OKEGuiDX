@@ -137,6 +137,33 @@ func TestParseVfrProfileSetsTimeCode(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsAByteOrderMark(t *testing.T) {
+	t.Parallel()
+	// The legacy loader used File.ReadAllText, which consumes a byte order
+	// mark. Profiles are hand-edited, and Notepad and Visual Studio both write
+	// one by default, so a file the old build opened must still open here.
+	// encoding/json rejects the mark on its own.
+	const body = `{"Version":3,"ProjectName":"bom","EncoderType":"x265"}`
+	path := filepath.Join(t.TempDir(), "bom.json")
+	if err := os.WriteFile(path, append([]byte{0xEF, 0xBB, 0xBF}, body...), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	p, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if p.ProjectName != "bom" {
+		t.Errorf("ProjectName = %q, want %q", p.ProjectName, "bom")
+	}
+
+	// Parse is the API's entry point and takes the body directly, so it has to
+	// tolerate the mark too.
+	if _, err := Parse("\uFEFF"+body, ""); err != nil {
+		t.Errorf("Parse() with a mark error = %v", err)
+	}
+}
+
 func TestParseReEncodeConfig(t *testing.T) {
 	t.Parallel()
 	// 00001.m2ts.json is an EpisodeConfig, not a task profile.

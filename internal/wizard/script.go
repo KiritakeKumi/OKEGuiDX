@@ -1,11 +1,11 @@
 package wizard
 
 import (
-	"os"
 	"regexp"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 )
 
 // This file ports the part of WizardFinish that prepares the script text: the
@@ -41,7 +41,9 @@ func rewriteScript(p *profile.Profile, projectDir string) (string, error) {
 			"配置 %s 没有指定 InputScript", p.ConfigFilePath)
 	}
 	path := resolveInput(projectDir, p.InputScript)
-	raw, err := os.ReadFile(path)
+	// The script is authored by hand and may carry a byte order mark; the
+	// legacy AddTaskService read it with File.ReadAllText.
+	raw, err := textfile.Read(path)
 	if err != nil {
 		return "", okerr.Wrap(err, okerr.KindNotFound, "vpy文件找不到",
 			"指定的vpy文件没有找到，检查下json文件和vpy文件是不是放一起了？(%q)", path)

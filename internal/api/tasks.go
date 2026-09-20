@@ -15,6 +15,7 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/node"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/wizard"
 )
@@ -821,7 +822,9 @@ func (s *Server) validationInputs(ctx context.Context, prof *profile.Profile, di
 
 	if prof.InputScript != "" {
 		path := resolveRelative(prof.InputScript, dir)
-		if raw, err := os.ReadFile(path); err == nil {
+		// The script is user-authored and may carry a mark; the legacy
+		// AddTaskService read it with File.ReadAllText.
+		if raw, err := textfile.Read(path); err == nil {
 			in.VpyText = string(raw)
 			in.VpyRead = true
 			prof.InputScript = path

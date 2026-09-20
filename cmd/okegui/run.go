@@ -16,6 +16,7 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/node"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/wizard"
 )
@@ -374,7 +375,7 @@ func loadOne(path string, caps node.Capabilities) (*profile.Profile, error) {
 		ResolveEncoder:     func(rel string) (string, bool) { return resolveExisting(dir, rel) },
 		ToolchainEncoder:   encoderFor(caps),
 	}
-	if raw, readErr := os.ReadFile(resolveFrom(dir, p.InputScript)); readErr == nil {
+	if raw, readErr := textfile.Read(resolveFrom(dir, p.InputScript)); readErr == nil {
 		inputs.VpyText = string(raw)
 		inputs.VpyRead = true
 	}

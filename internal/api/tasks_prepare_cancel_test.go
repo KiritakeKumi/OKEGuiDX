@@ -765,19 +765,30 @@ func (e *blockingExecutor) Cancel(_ context.Context, id model.TaskID) error {
 }
 
 // WaitEntered blocks until the executor is running the task.
+// WaitEntered blocks until the executor has started id.
+//
+// The worker claims its next task asynchronously after the previous one ends, so
+// the entry may not exist yet when this is called. Waiting for it to appear is
+// what makes the "the worker moved on" assertion mean anything; failing
+// immediately on a missing entry would only report the race.
 func (e *blockingExecutor) WaitEntered(t *testing.T, id model.TaskID) {
 	t.Helper()
-	e.mu.Lock()
-	entered := e.entered[id]
-	e.mu.Unlock()
-	if entered == nil {
-		t.Fatalf("task %s was never submitted", id)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		entered := e.entered[id]
+		e.mu.Unlock()
+		if entered == nil {
+			time.Sleep(2 * time.Millisecond)
+			continue
+		}
+		select {
+		case <-entered:
+			return
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("the executor never entered task %s", id)
-	}
+	t.Fatalf("task %s was never submitted", id)
 }
 
 // Release lets a task finish successfully.

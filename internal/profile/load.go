@@ -2,11 +2,11 @@ package profile
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"regexp"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 )
 
 // InputTagPattern matches the "# OKE:INPUTFILE arg=" marker that the technical
@@ -25,7 +25,7 @@ var DebugTagPattern = regexp.MustCompile(`(?mi)^# *OKE:DEBUG([\s]+[\w]+[ ]*=[ ]*
 // options before parsing, exactly as the legacy loader did, and returns a
 // *ValidationError so callers never have to inspect raw JSON errors.
 func Load(path string) (*Profile, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := textfile.Read(path)
 	if err != nil {
 		return nil, &ValidationError{
 			Summary: "无法读取json文件",
@@ -33,12 +33,22 @@ func Load(path string) (*Profile, error) {
 			Field:   "ConfigFilePath",
 		}
 	}
-	return Parse(string(raw), path)
+	return parseDecoded(string(raw), path)
 }
 
-// Parse decodes and validates a profile. profilePath is used to fill in
-// ConfigFilePath and to resolve relative input paths.
+// Parse decodes and validates a profile that is already in memory. The API
+// accepts a profile body directly, so this is a second entry point alongside
+// Load and it applies the same byte order mark handling: a client that posts a
+// file it read from disk posts the mark too, and the legacy service accepted
+// that. profilePath is used to fill in ConfigFilePath and to resolve relative
+// input paths.
 func Parse(raw string, profilePath string) (*Profile, error) {
+	return parseDecoded(string(textfile.Decode([]byte(raw))), profilePath)
+}
+
+// parseDecoded is Parse's body, split out so the mark is consumed exactly once
+// and Load can hand over bytes it already decoded.
+func parseDecoded(raw string, profilePath string) (*Profile, error) {
 	if opt := DeprecatedOptionFound(raw); opt != "" {
 		return nil, &ValidationError{
 			Summary: "json文件版本太老了",
@@ -71,7 +81,7 @@ func Parse(raw string, profilePath string) (*Profile, error) {
 // LoadEpisodeConfig reads the separate per-episode configuration file used by
 // re-encode tasks.
 func LoadEpisodeConfig(path string) (*EpisodeConfig, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := textfile.Read(path)
 	if err != nil {
 		return nil, &ValidationError{
 			Summary: "无法读取json文件",

@@ -8,6 +8,7 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/log"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/platform"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
 )
 
@@ -66,7 +67,9 @@ func (c *configLoader) load(explicitPath string) {
 // file is not an error: the defaults apply.
 func loadConfigFile(path string) (platform.Config, error) {
 	cfg := platform.DefaultConfig()
-	raw, err := os.ReadFile(path)
+	// Same tolerance as platform.LoadConfig: the file is hand-edited, and
+	// .NET's File.ReadAllText skipped a byte order mark.
+	raw, err := textfile.Read(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
