@@ -254,6 +254,47 @@ func TestArgs(t *testing.T) {
 	}
 }
 
+// TestEpisodeArgsAreIndependentOfTheBuilder hardcodes the full command line
+// instead of calling the shared builder the way TestArgs does. The tokens are
+// transcribed from the legacy NewMkvEpisodeMuxer.BuildCommandline
+// (JobProcessor/Muxer/NewMkvEpisodeMuxer.cs): every source file is grouped in
+// parentheses with its per-track options, audio and subtitle files get the
+// --no-track-tags --no-global-tags pair, and --track-order closes the line. A
+// change to mkvmerge.BuildArgs that TestArgs would follow silently fails here.
+func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
+	t.Parallel()
+	media := &model.MediaFile{
+		Video: videoTrack(`D:\work\ep01_all.mkv`, `D:\work\ep01.v2.tcfile`),
+		AudioTracks: []*model.AudioTrack{
+			audioTrack(`D:\work\ep01.flac`, model.MuxOptionDefault, "jpn", "Main"),
+		},
+		Chapter: chapterTrack(`D:\work\ep01.txt`, "jpn"),
+	}
+	p := New(Options{
+		Mkvmerge: mkvmergePath,
+		Output:   `D:\out\00001.m2ts.mkv`,
+		Media:    media,
+	})
+	want := []string{
+		"--ui-language", "en",
+		"--output", `D:\out\00001.m2ts.mkv`,
+		"--timestamps", `0:D:\work\ep01.v2.tcfile`,
+		"--default-track", "0:1",
+		"--language", "0:und",
+		"--track-name", "0:",
+		"(", `D:\work\ep01_all.mkv`, ")",
+		"--no-track-tags", "--no-global-tags",
+		"--default-track", "0:1",
+		"--language", "0:jpn",
+		"--track-name", "0:Main",
+		"(", `D:\work\ep01.flac`, ")",
+		"--chapter-language", "jpn",
+		"--chapters", `D:\work\ep01.txt`,
+		"--track-order", "0:0,1:0",
+	}
+	assertArgs(t, p.Args(), want)
+}
+
 // TestFileName covers TaskDetail.UpdateOutputFileName, including the fallback
 // to the video format when the profile leaves ContainerFormat empty.
 func TestFileName(t *testing.T) {

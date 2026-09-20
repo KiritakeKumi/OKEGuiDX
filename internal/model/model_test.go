@@ -138,6 +138,35 @@ func TestFileRefJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFileRefDriveSurvivesQueueRoundTrip is the end-to-end anchor for the
+// dropped-drive bug. The task queue serializes a FileRef to the documented
+// "volume/path" string (MarshalText) and reads it back (UnmarshalText); every
+// downstream stage then calls Resolve. Both expectations below are literals
+// rather than values computed by the code under test, so a regression cannot
+// hide: reverting normalizeRel or Resolve makes this fail.
+func TestFileRefDriveSurvivesQueueRoundTrip(t *testing.T) {
+	t.Parallel()
+	orig := NewFileRef(`D:\a\b\ep01.mkv`)
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	// A drive-qualified reference keeps the drive in its rel form, so the
+	// serialized identity is "local/D:/a/b/ep01.mkv", not "local/a/b/ep01.mkv".
+	if want := `"local/D:/a/b/ep01.mkv"`; string(data) != want {
+		t.Fatalf("Marshal() = %s, want %s", data, want)
+	}
+
+	var back FileRef
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if got, want := back.ResolveLocal(""), filepath.FromSlash("D:/a/b/ep01.mkv"); got != want {
+		t.Errorf("ResolveLocal(\"\") after a queue round trip = %q, want %q", got, want)
+	}
+}
+
 func TestNewTaskIDIsUniqueAndWellFormed(t *testing.T) {
 	t.Parallel()
 	seen := make(map[TaskID]struct{}, 1000)

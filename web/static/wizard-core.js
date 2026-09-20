@@ -71,6 +71,14 @@ const DEPRECATED_OPTIONS = ["SkipMuxing", "IncludeSub", "SubtitleLanguage"];
 
 // deprecatedOptionFound returns the first deprecated option present in the raw
 // text, or "".
+//
+// The comparison lowercases the whole text, which is what the Go port does
+// (profile.DeprecatedOptionFound uses strings.ToLower) and what keeps the page
+// and the server in agreement. It is deliberately NOT the C# comparison: the
+// legacy IndexOf used StringComparison.OrdinalIgnoreCase, which does not fold
+// U+212A KELVIN SIGN, while both Go and JavaScript do. See the audit note in
+// the test file; changing this to match the C# exactly would make the page
+// disagree with the server.
 function deprecatedOptionFound(raw) {
   const lower = String(raw).toLowerCase();
   for (const opt of DEPRECATED_OPTIONS) {
@@ -119,7 +127,12 @@ function errorFromBody(payload, fallback) {
 // operator's own base directory is the best signal available.
 function pathStyle(reference) {
   const text = String(reference || "");
-  const windows = /^[A-Za-z]:[\\/]/.test(text) || text.includes("\\");
+  // A UNC share spelled "//server/share" is a Windows path too: the legacy
+  // FileInfo.FullName and the Go server's filepath.Clean both render it with
+  // backslashes, so treating it as POSIX would make the preview disagree with
+  // the path the task stores.
+  const windows =
+    /^[A-Za-z]:[\\/]/.test(text) || text.includes("\\") || text.startsWith("//");
   return { sep: windows ? "\\" : "/", windows };
 }
 
@@ -141,11 +154,13 @@ function joinPath(dir, rel) {
 // preserving the leading root and the separator convention of its input.
 // Mirrors filepath.Clean plus the legacy Path.GetFullPath behaviour on the parts
 // that matter here. A UNC prefix ("\\server") is preserved: collapsing it would
-// turn a network path into a drive-relative one.
+// turn a network path into a drive-relative one. A forward-slash share
+// ("//server/share") is the same thing — .NET renders it with backslashes — so
+// it is recognized too.
 function normalizePath(path) {
   const text = String(path || "");
   const { sep } = pathStyle(text);
-  const unc = text.startsWith("\\\\");
+  const unc = text.startsWith("\\\\") || text.startsWith("//");
   const unix = text.replace(/\\/g, "/");
   const rooted = unix.startsWith("/");
   const segments = [];
@@ -176,12 +191,22 @@ function baseName(path) {
   return i < 0 ? unix : unix.slice(i + 1);
 }
 
-// fileExt returns the extension including the dot, lowercased. Mirrors
+// fileExt returns the extension including the dot, lowercased. It mirrors
 // Path.GetExtension(...).ToLower().
+//
+// Path.GetExtension scans back to the last dot in the file name, so a name
+// whose only dot is its first character is entirely an extension (".mkv" is
+// ".mkv", not ""), while a dot that is the last character is not an extension
+// ("trailing." has none). Both rules come straight from the .NET
+// implementation, and fileExt("x.mkv") and fileExt(".mkv") must both answer
+// ".mkv" for the re-encode check below to agree with the legacy code.
 function fileExt(name) {
   const base = baseName(name);
   const i = base.lastIndexOf(".");
-  return i <= 0 ? "" : base.slice(i).toLowerCase();
+  if (i < 0 || i === base.length - 1) {
+    return "";
+  }
+  return base.slice(i).toLowerCase();
 }
 
 // resolveRelative mirrors api.resolveRelative / PathUtils.GetFullPath: an
@@ -265,11 +290,18 @@ function normalizeFps(prof) {
 // against the profile's directory and a duplicate stops it. Existence cannot be
 // checked from a browser; the server re-runs that check and reports it with the
 // legacy wording.
+//
+// An empty entry is rejected here, which is what api.selectInput does: the
+// legacy code let Path.Combine produce the directory itself and then failed the
+// existence check, so the operator never got past it either.
 function resolveInputFiles(prof, baseDir) {
   const files = Array.isArray(prof.InputFiles) ? prof.InputFiles : [];
   const resolved = [];
   const seen = new Set();
   for (const file of files) {
+    if (String(file).trim() === "") {
+      throw new ValidationError("输入文件不合法", "输入文件路径为空。", "InputFiles");
+    }
     const full = resolveRelative(file, baseDir);
     if (seen.has(full)) {
       throw new ValidationError(
@@ -315,7 +347,15 @@ function validateProfile(prof, baseDir) {
   }
 
   prof.EncoderType = String(prof.EncoderType || "").toLowerCase();
-  const videoFormat = { x264: "AVC", x265: "HEVC", svtav1: "AV1" }[prof.EncoderType];
+  // A Map, not an object literal: a bare object inherits Object.prototype, so
+  // EncoderType "constructor" or "__proto__" would look like a known encoder
+  // (their inherited values are truthy) and pass validation with a nonsense
+  // VideoFormat, where profile.Validate rejects anything but the three names.
+  const videoFormat = new Map([
+    ["x264", "AVC"],
+    ["x265", "HEVC"],
+    ["svtav1", "AV1"],
+  ]).get(prof.EncoderType);
   if (!videoFormat) {
     throw new ValidationError("编码器版本错误", "EncoderType请填写x264/x265/svtav1", "EncoderType");
   }
@@ -396,7 +436,12 @@ function validateAudio(prof) {
 // (buildVpy), so the only thing left for the page is the check LoadVsScript ran
 // before the wizard could advance: a template without the tag cannot be turned
 // into a per-source script at all.
-const TAG_INPUT = /^# *OKE:INPUTFILE([\s]+\w+[ ]*=[ ]*)(r*["'].*["'])/gim;
+//
+// The class is spelled [ \t\r\n\f] rather than \s on purpose: JavaScript's \s
+// also matches U+00A0, U+2028, U+2029 and U+3000, none of which .NET's \s or
+// Go's RE2 \s match. A stray non-breaking space after the tag would otherwise
+// let the page accept a template the server's profile.Validate rejects.
+const TAG_INPUT = /^# *OKE:INPUTFILE([ \t\r\n\f]+\w+[ ]*=[ ]*)(r*["'].*["'])/gim;
 
 // hasInputTag reports whether a script carries the tag at all, which is what
 // LoadVsScript checked before the wizard could advance. The pattern is global,

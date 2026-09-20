@@ -80,6 +80,18 @@ test("deprecatedOptionFound finds the legacy options", () => {
   assert.equal(Core.deprecatedOptionFound('{"ProjectName":"ep01"}'), "");
 });
 
+test("deprecatedOptionFound folds the way the Go port does", () => {
+  // profile.DeprecatedOptionFound lowercases the whole text (strings.ToLower),
+  // and JavaScript's toLowerCase folds the same code points, so the page and the
+  // server agree. The legacy C# used OrdinalIgnoreCase, which does NOT fold
+  // U+212A KELVIN SIGN; that divergence lives in the Go layer and is reported,
+  // not reproduced here. This test pins the Go-matching behaviour so a future
+  // "fix" toward the C# cannot silently desync the page.
+  assert.equal(Core.deprecatedOptionFound('{"S\u212aIPMUXING":true}'), "SkipMuxing");
+  assert.equal(Core.deprecatedOptionFound('{"SK\u212aIPMUXING":true}'), "");
+  assert.equal(Core.deprecatedOptionFound('{"S\u0130kipMuxing":true}'), "");
+});
+
 // ---------------------------------------------------------------------------
 // Profile validation (AddTaskService.ProcessJsonProfile)
 // ---------------------------------------------------------------------------
@@ -103,6 +115,21 @@ test("validateProfile lowercases the encoder and uppercases the container", () =
   Core.validateProfile(prof, "");
   assert.equal(prof.EncoderType, "x265");
   assert.equal(prof.ContainerFormat, "MKV");
+});
+
+test("validateProfile rejects inherited object keys as encoder types", () => {
+  // The lookup must not consult Object.prototype: "constructor" and "__proto__"
+  // are not encoders, and a bare object literal would have accepted them with a
+  // function (or the prototype) as VideoFormat.
+  for (const name of ["constructor", "__proto__", "hasOwnProperty", "toString"]) {
+    const prof = loadProfile(profileText);
+    prof.EncoderType = name;
+    assert.throws(
+      () => Core.validateProfile(prof, ""),
+      (err) => err.summary === "编码器版本错误" && err.field === "EncoderType",
+      name
+    );
+  }
 });
 
 // The table below mirrors the MessageBox calls of ProcessJsonProfile one for
@@ -268,6 +295,18 @@ test("validateProfile resolves an absolute input against no directory", () => {
   assert.deepEqual(Core.validateProfile(prof, "D:\\proj"), ["/srv/ep01/00001.m2ts"]);
 });
 
+test("validateProfile rejects an empty input entry like the server", () => {
+  const prof = loadProfile(profileText);
+  prof.InputFiles = ["", "00001.m2ts"];
+  assert.throws(
+    () => Core.validateProfile(prof, "D:\\proj"),
+    (err) =>
+      err instanceof Core.ValidationError &&
+      err.summary === "输入文件不合法" &&
+      err.field === "InputFiles"
+  );
+});
+
 // ---------------------------------------------------------------------------
 // #OKE tag detection (AddTaskService.LoadVsScript)
 // ---------------------------------------------------------------------------
@@ -280,6 +319,17 @@ test("hasInputTag accepts the fixture and refuses a plain script", () => {
   assert.equal(Core.hasInputTag("# just a comment\nclip.set_output()\n"), false);
 });
 
+test("hasInputTag uses the .NET/RE2 whitespace set, not JavaScript's", () => {
+  // JavaScript's \s matches U+00A0 and U+3000; .NET's \s and Go's RE2 \s do
+  // not. The server's profile.Validate uses the same pattern, so the page must
+  // not accept a template the server refuses.
+  assert.equal(Core.hasInputTag("#OKE:INPUTFILE\u00a0arg=r\"\"\n"), false);
+  assert.equal(Core.hasInputTag("#OKE:INPUTFILE\u3000arg=r\"\"\n"), false);
+  // The two that .NET and RE2 do accept are still accepted.
+  assert.equal(Core.hasInputTag("#OKE:INPUTFILE\targ=r\"\"\n"), true);
+  assert.equal(Core.hasInputTag("#OKE:INPUTFILE\farg=r\"\"\n"), true);
+});
+
 // ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
@@ -290,6 +340,23 @@ test("resolveRelative keeps an absolute path and joins a relative one", () => {
   assert.equal(Core.resolveRelative("/abs/00001.m2ts", "D:\\proj"), "/abs/00001.m2ts");
   assert.equal(Core.resolveRelative("00001.m2ts", ""), "00001.m2ts");
   assert.equal(Core.resolveRelative("", "D:\\proj"), "");
+});
+
+test("resolveRelative renders a forward-slash UNC share with backslashes", () => {
+  // FileInfo.FullName and the Go server's filepath.Clean both render
+  // "//server/share/x" as "\\server\share\x"; a POSIX-shaped preview would
+  // disagree with the path the task stores.
+  assert.equal(Core.resolveRelative("//server/share/00001.m2ts", "D:\\proj"), "\\\\server\\share\\00001.m2ts");
+  assert.equal(Core.normalizePath("//server/share/x"), "\\\\server\\share\\x");
+  assert.deepEqual(Core.pathStyle("//server/share"), { sep: "\\", windows: true });
+});
+
+test("resolveRelative handles the separators .NET treated as rooted", () => {
+  // .NET's Path.IsPathRooted accepts a leading backslash; Go's filepath.IsAbs
+  // does not, so "\\foo" is joined onto the base directory on Windows.
+  assert.equal(Core.resolveRelative("\\foo", "D:\\proj"), "D:\\proj\\foo");
+  // A drive-relative "C:foo" is not rooted for either engine.
+  assert.equal(Core.resolveRelative("C:foo", "D:\\proj"), "D:\\proj\\C:foo");
 });
 
 test("normalizePath collapses dots and doubles", () => {
@@ -309,10 +376,19 @@ test("baseName splits a path the way FileInfo.Name did", () => {
   assert.equal(Core.baseName("/srv/x.mkv"), "x.mkv");
 });
 
-test("fileExt ignores a leading dot", () => {
+test("fileExt mirrors Path.GetExtension(...).ToLower()", () => {
   assert.equal(Core.fileExt("00001.m2ts"), ".m2ts");
   assert.equal(Core.fileExt("ARCHIVE.MKV"), ".mkv");
-  assert.equal(Core.fileExt(".gitignore"), "");
+  // Path.GetExtension scans back to the last dot in the file name, so a name
+  // whose only dot is its first character is entirely an extension. The legacy
+  // re-encode check compared this value with ".mkv", so ".mkv" has to survive.
+  assert.equal(Core.fileExt(".gitignore"), ".gitignore");
+  assert.equal(Core.fileExt(".mkv"), ".mkv");
+  assert.equal(Core.fileExt(".a.b"), ".b");
+  // A dot that ends the name is not an extension.
+  assert.equal(Core.fileExt("trailing."), "");
+  assert.equal(Core.fileExt("noext"), "");
+  assert.equal(Core.fileExt("."), "");
 });
 
 // ---------------------------------------------------------------------------
@@ -349,6 +425,18 @@ test("validateEpisodeConfig accepts a non-mkv old file with ReExtractSource", ()
     EnableReEncode: true,
     ReExtractSource: true,
     ReEncodeOldFile: "old.mp4",
+    ReEncodeSliceArray: [{ Begin: 0, End: 10 }],
+  });
+  assert.equal(got.ReEncodeSliceArray.length, 1);
+});
+
+test("validateEpisodeConfig reads the old file extension like .NET", () => {
+  // A file literally named ".mkv" has the extension ".mkv" for
+  // Path.GetExtension, so it must not be rejected as "not mkv". The Go side
+  // does not run this check (see the audit), so this is the page's only guard.
+  const got = Core.validateEpisodeConfig({
+    EnableReEncode: true,
+    ReEncodeOldFile: ".mkv",
     ReEncodeSliceArray: [{ Begin: 0, End: 10 }],
   });
   assert.equal(got.ReEncodeSliceArray.length, 1);
