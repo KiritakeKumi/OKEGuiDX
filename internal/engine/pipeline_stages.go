@@ -70,7 +70,7 @@ func (p *Pipeline) stageInspect(ctx context.Context, st *runState, rep *reporter
 	}
 	gen := iframe.New(iframe.Options{
 		VSPipe:         vspipe,
-		OldFile:        st.cfg.ReEncodeOldFile,
+		OldFile:        st.oldFile(),
 		WorkingPath:    st.p.WorkingPathPrefix,
 		NumberOfFrames: st.frames,
 	})
@@ -145,15 +145,18 @@ func (p *Pipeline) prepareChapters(ctx context.Context, st *runState) error {
 // stagePlanReEncode is CheckReEncodeSlice plus the layout half of
 // GenerateReEncodeJob: align every requested slice to the old release's
 // I-frames, merge what became contiguous, and lay out the parts.
+//
+// The aligned ranges are recorded in the run state rather than written back to
+// the episode config, which the queue shares with its snapshots.
 func (p *Pipeline) stagePlanReEncode(st *runState) error {
 	if !st.reEncode() {
 		return nil
 	}
-	slices, err := checkReEncodeSlices(st.cfg.ReEncodeSliceArray, st.iFrames, st.inputPath())
+	slices, err := checkReEncodeSlices(st.reEncodeSlices, st.iFrames, st.inputPath())
 	if err != nil {
 		return err
 	}
-	st.cfg.ReEncodeSliceArray = slices
+	st.reEncodeSlices = slices
 	if err := st.planParts(); err != nil {
 		return err
 	}
@@ -490,7 +493,7 @@ func (p *Pipeline) muxPart(ctx context.Context, st *runState, part *part, rep *r
 			SourceFile: st.inputPath(),
 			Priority:   p.opts.Priority,
 		},
-		Input: part.source(st.cfg.ReEncodeOldFile),
+		Input: part.source(st.oldFile()),
 	}
 	if !part.reEncode {
 		opts.Partial = true
@@ -584,7 +587,7 @@ func (p *Pipeline) stageMergeOld(ctx context.Context, st *runState, rep *reporte
 			Priority:   p.opts.Priority,
 		},
 		Input:        st.appended,
-		OldFile:      st.cfg.ReEncodeOldFile,
+		OldFile:      st.oldFile(),
 		TimecodeFile: st.timecodeFile,
 	})
 	if err := runProcessor(ctx, mux, rep.sink()); err != nil {

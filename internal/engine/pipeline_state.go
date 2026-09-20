@@ -33,8 +33,22 @@ type runState struct {
 
 	// p and cfg are the profile and the episode config. p is non-nil once
 	// loadProfile returned; cfg is non-nil only for a re-encode task.
+	//
+	// Both are read-only: the queue shares them with every snapshot it hands
+	// out (TaskManager.cloneTask), so the values the run derives from them live
+	// in the fields below rather than being written back.
 	p   *profile.Profile
 	cfg *profile.EpisodeConfig
+
+	// isReEncode is the reconciled re-encode flag: the profile's IsReEncode or
+	// the episode config's EnableReEncode. The legacy wizard copied the second
+	// onto the first; keeping the result here leaves the profile untouched.
+	isReEncode bool
+	// reEncodeSlices is the re-encode slice array the run works on: the
+	// requested slices after the profile-level validation sorted and merged
+	// them, then the I-frame-aligned ranges stagePlanReEncode derives. The
+	// episode config's own array is never written.
+	reEncodeSlices []model.SliceInfo
 
 	// vspipe is the resolved vspipe path, cached because three stages need it.
 	vspipe string
@@ -140,9 +154,9 @@ func (p part) frameCount(total int64) int64 {
 //
 // The legacy code had two sources of truth, TaskProfile.IsReEncode (set by the
 // wizard from the episode config) and the presence of a config object, and used
-// them interchangeably. The Go model keeps both in the profile, so the pipeline
-// reads the one field; loadProfile is what makes the two agree.
-func (st *runState) reEncode() bool { return st.p != nil && st.p.IsReEncode }
+// them interchangeably. loadProfile reconciles the two into isReEncode, so the
+// pipeline reads one field and never writes the profile.
+func (st *runState) reEncode() bool { return st.isReEncode }
 
 // inputPath resolves the task's first input.
 func (st *runState) inputPath() string {
@@ -163,6 +177,19 @@ func (st *runState) vspipeArgs() []string {
 	}
 	return st.cfg.VspipeArgs
 }
+
+// oldFile is the re-encode source: the old release the new parts are spliced
+// into, empty for a normal task.
+func (st *runState) oldFile() string {
+	if st.cfg == nil {
+		return ""
+	}
+	return st.cfg.ReEncodeOldFile
+}
+
+// reExtractSource reports whether a re-encode re-extracts the source's tracks
+// instead of reusing the old release's.
+func (st *runState) reExtractSource() bool { return st.cfg != nil && st.cfg.ReExtractSource }
 
 // chapterService builds the chapter service for this task. Every external tool
 // it needs is looked up in the node's capabilities, so a node without tchapter
@@ -330,7 +357,7 @@ func (st *runState) planParts() error {
 	var prevEnd int64
 	partID := 0
 
-	for i, s := range st.cfg.ReEncodeSliceArray {
+	for i, s := range st.reEncodeSlices {
 		if i == 0 {
 			if s.Begin != 0 {
 				parts = append(parts, st.copiedPart(partID, model.NewSliceInfo(0, s.Begin)))

@@ -31,29 +31,36 @@ func (p *Pipeline) loadProfile(t *model.Task, rep *reporter) (*runState, error) 
 
 	// The wizard was the only place that ever set IsReEncode, and it did so from
 	// the episode config's EnableReEncode. The two are reconciled here so that a
-	// task recovered from the queue behaves like one a wizard produced.
-	prof.IsReEncode = prof.IsReEncode || (cfg != nil && cfg.EnableReEncode)
-	if prof.IsReEncode && cfg == nil {
+	// task recovered from the queue behaves like one a wizard produced. The
+	// result stays in the run state: the profile belongs to the queue, which
+	// shares it with every snapshot it hands out.
+	isReEncode := prof.IsReEncode || (cfg != nil && cfg.EnableReEncode)
+	if isReEncode && cfg == nil {
 		return nil, okerr.New(okerr.KindConfig, "参数不完整",
 			"ReEncode 任务 %s 没有关联的 episode 配置（ReEncodeOldFile 与 ReEncodeSliceArray）", t.ID)
 	}
 
 	// Re-check what the pipeline depends on. The queue may hold a task whose
 	// profile was edited afterwards, and a re-encode is the case where a wrong
-	// field produces a wrong release rather than a failed run.
-	if err := validateForRun(prof, cfg); err != nil {
+	// field produces a wrong release rather than a failed run. The returned
+	// slices are a private copy, already sorted and merged, so the run works on
+	// them instead of on the queue's array.
+	slices, err := validateForRun(prof, cfg)
+	if err != nil {
 		return nil, err
 	}
 
 	st := &runState{
-		opts:  &p.opts,
-		t:     t,
-		p:     prof,
-		cfg:   cfg,
-		media: model.NewMediaFile(),
-		mka:   model.NewMediaFile(),
+		opts:           &p.opts,
+		t:              t,
+		p:              prof,
+		cfg:            cfg,
+		isReEncode:     isReEncode,
+		reEncodeSlices: slices,
+		media:          model.NewMediaFile(),
+		mka:            model.NewMediaFile(),
 	}
-	t.IsReEncode = prof.IsReEncode
+	t.IsReEncode = isReEncode
 	log.Info("-------------------------------------------------------------------")
 	log.Info("开始处理任务", "input", st.inputPath())
 	return st, nil
@@ -78,31 +85,45 @@ func (p *Pipeline) profileFor(t *model.Task) (*profile.Profile, *profile.Episode
 // narrower than profile.Validate: that function needs the VapourSynth
 // installation and the source files, which cannot be re-checked on every run,
 // while these checks are pure profile arithmetic.
-func validateForRun(p *profile.Profile, cfg *profile.EpisodeConfig) error {
+//
+// It returns the re-encode slices to work on: a copy of the episode config's
+// array, normalized the way profile.ValidateEpisodeConfig leaves it. That
+// function sorts and merges its argument in place, so handing it the config's
+// own array would write to a value the queue shares with its snapshots.
+func validateForRun(p *profile.Profile, cfg *profile.EpisodeConfig) ([]model.SliceInfo, error) {
 	if p.InputScript == "" {
-		return okerr.New(okerr.KindConfig, "vpy文件找不到",
+		return nil, okerr.New(okerr.KindConfig, "vpy文件找不到",
 			"配置 %s 没有指定 InputScript", p.ConfigFilePath)
 	}
 	if p.WorkingPathPrefix == "" {
-		return okerr.New(okerr.KindConfig, "工作目录没有指定",
+		return nil, okerr.New(okerr.KindConfig, "工作目录没有指定",
 			"配置 %s 没有工作路径前缀，无法为任务生成中间文件", p.ConfigFilePath)
 	}
 	if p.OutputPathPrefix == "" {
-		return okerr.New(okerr.KindConfig, "输出目录没有指定",
+		return nil, okerr.New(okerr.KindConfig, "输出目录没有指定",
 			"配置 %s 没有输出路径前缀，无法确定成品位置", p.ConfigFilePath)
 	}
 	switch profile.EncoderType(p.EncoderType) {
 	case profile.EncoderX264, profile.EncoderX265, profile.EncoderSVTAV1:
 	default:
-		return okerr.New(okerr.KindConfig, "编码器版本错误",
+		return nil, okerr.New(okerr.KindConfig, "编码器版本错误",
 			"EncoderType 请填写 x264/x265/svtav1（当前 %q）", p.EncoderType)
 	}
 	if p.FpsNum <= 0 || p.FpsDen <= 0 {
-		return okerr.New(okerr.KindConfig, "帧率没有指定诶",
+		return nil, okerr.New(okerr.KindConfig, "帧率没有指定诶",
 			"配置 %s 的 FpsNum/FpsDen 不合法（%d/%d）", p.ConfigFilePath, p.FpsNum, p.FpsDen)
 	}
 	if cfg == nil {
-		return nil
+		return nil, nil
 	}
-	return profile.ValidateEpisodeConfig(cfg)
+
+	slices := append([]model.SliceInfo(nil), cfg.ReEncodeSliceArray...)
+	clone := *cfg
+	clone.ReEncodeSliceArray = slices
+	if err := profile.ValidateEpisodeConfig(&clone); err != nil {
+		return nil, err
+	}
+	// The validator replaces the array with the merged one, so the normalized
+	// value is the clone's, not the copy handed to it.
+	return clone.ReEncodeSliceArray, nil
 }

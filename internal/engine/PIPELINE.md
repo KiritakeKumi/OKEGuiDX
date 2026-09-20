@@ -23,10 +23,10 @@ replaces.
 
 | # | Stage | Legacy source | Contract |
 |---|---|---|---|
-| 0 | `loadProfile` | — | Recover the profile and episode config. Fails when a re-encode has no episode config, or when a field the pipeline depends on is missing. |
+| 0 | `loadProfile` | — | Recover the profile and episode config. Fails when a re-encode has no episode config, or when a field the pipeline depends on is missing. Sets `isReEncode`, `reEncodeSlices`; both inputs stay read-only. |
 | 1 | `stageInspect` | `GetVSPipeInfo` | Run `vspipe --info`; enforce the frame-rate check; for a re-encode, run the I-frame probe. Sets `frames`, `vsInfo`, `iFrames`. |
 | 2 | `stagePrepare` | `DoPreparation` | Write the timecode file (VFR), load and write the chapters, derive the qpfile. Sets `timecodeFile`, `chapterFrames`, `qpValue`, `media.Chapter`. |
-| 3 | `stagePlanReEncode` | `CheckReEncodeSlice`, `GenerateReEncodeJob` (layout) | Align the requested slices to the old release's I-frames, merge contiguous ones, lay out the parts. Sets `parts`, `task.SliceParts`. |
+| 3 | `stagePlanReEncode` | `CheckReEncodeSlice`, `GenerateReEncodeJob` (layout) | Align the requested slices to the old release's I-frames, merge contiguous ones, lay out the parts. Sets `reEncodeSlices`, `parts`, `task.SliceParts`. |
 | 4 | `stageDemux` | `ExtractSource`, `GenerateAudioJob`, `AddSubtitle` | Extract the source's tracks, detect empty and duplicate ones, queue the audio jobs and route the subtitles. Sets `srcAudio`, `srcSubs`, `audioJobs`. |
 | 5 | `stageAudio` | `DoAllJobs` (AudioJob) | Transcode each queued track and route it to the main or the external container. |
 | 6 | `stageMKA` | `GenerateMuxJob`, `DoAllJobs` (NewMkvEpisode/MKA) | Mux the external audio file, when any track was routed to it. |
@@ -43,6 +43,24 @@ Two conditions make the sequence non-linear, and both are in `runStages`:
   time instead;
 - the container block is a merge (`--no-video` on the old release) only for a
   re-encode without `ReExtractSource`.
+
+## Read-only inputs
+
+The task the pipeline is handed carries its profile and episode config as shared
+pointers: `TaskManager.cloneTask` copies the task's slices but deliberately
+leaves `Profile` and `Config` alone, and every queue snapshot shares them with
+the running worker. The pipeline therefore **never writes** to either. Everything
+it derives from them lives in the `runState`:
+
+- the reconciled re-encode flag (`IsReEncode || EnableReEncode`) is
+  `runState.isReEncode`, not a write back to the profile;
+- the re-encode slice array is `runState.reEncodeSlices`: a private copy, first
+  normalized by `profile.ValidateEpisodeConfig` (which sorts and merges in
+  place), then aligned to the old release's I-frames.
+
+`pipeline_readonly_test.go` is the acceptance test: it runs a task and compares
+the profile and config before and after, and it races a JSON reader against the
+run so a reintroduced write fails under `-race`.
 
 ## Platform capabilities
 
@@ -121,5 +139,8 @@ are separate functions:
 - It never writes to the task queue. `PipelineOptions.UpdateTask` is the hook for
   the fields a `model.StatusEvent` cannot carry (the chapter status and the RPC
   result); the worker pool owns the queue.
+- It never writes to the profile or the episode config it is given. Both are
+  shared with the queue, which serves them to API clients; see "Read-only
+  inputs" above.
 - It never reads global state. `PipelineOptions` carries the toolchain, the
   profile loader, the NUMA allocator and the priorities.

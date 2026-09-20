@@ -199,7 +199,7 @@ func (p *Pipeline) runStages(ctx context.Context, st *runState, rep *reporter) e
 	// The legacy condition was `!IsReEncode || (IsReEncode && ReExtractSource)`:
 	// a re-encode that reuses the old release's tracks skips demuxing entirely
 	// and takes those tracks from the old file at mux time instead.
-	if !st.reEncode() || st.cfg.ReExtractSource {
+	if !st.reEncode() || st.reExtractSource() {
 		if err := p.stageDemux(ctx, st, rep); err != nil {
 			return err
 		}
@@ -241,7 +241,7 @@ func (p *Pipeline) stageVideoFlow(ctx context.Context, st *runState, rep *report
 // the new video with the old release's remaining tracks, every other shape muxes
 // the media file the earlier stages assembled.
 func (p *Pipeline) stageMuxFlow(ctx context.Context, st *runState, rep *reporter) error {
-	if st.reEncode() && !st.cfg.ReExtractSource {
+	if st.reEncode() && !st.reExtractSource() {
 		return p.stageMergeOld(ctx, st, rep)
 	}
 	return p.stageMux(ctx, st, rep)

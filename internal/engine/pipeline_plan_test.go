@@ -161,8 +161,10 @@ func TestPlanParts(t *testing.T) {
 					WorkingPathPrefix: filepath.Join("work", "ep01"),
 					IsReEncode:        true,
 				},
-				cfg:    &profile.EpisodeConfig{ReEncodeSliceArray: tc.slices},
-				frames: tc.frames,
+				cfg:            &profile.EpisodeConfig{ReEncodeSliceArray: tc.slices},
+				isReEncode:     true,
+				reEncodeSlices: tc.slices,
+				frames:         tc.frames,
 			}
 			if err := st.planParts(); err != nil {
 				t.Fatalf("planParts() error = %v", err)
@@ -231,6 +233,7 @@ func TestPartNaming(t *testing.T) {
 					WorkingPathPrefix: "ep01",
 					IsReEncode:        tc.reEncode,
 				},
+				isReEncode: tc.reEncode,
 			}
 			var p part
 			if tc.reEncode {
