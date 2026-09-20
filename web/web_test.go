@@ -279,7 +279,7 @@ func TestHandlerServesTheNewTaskWizard(t *testing.T) {
 	}{
 		{path: "/static/wizard.html", wantType: "text/html", wantBody: "新建任务向导"},
 		{path: "/static/wizard.js", wantType: "javascript", wantBody: "window.OKEWizardCore"},
-		{path: "/static/wizard-core.js", wantType: "javascript", wantBody: "derivePaths"},
+		{path: "/static/wizard-core.js", wantType: "javascript", wantBody: "hasInputTag"},
 		{path: "/static/wizard.css", wantType: "text/css", wantBody: ".field-error"},
 	}
 	for _, tc := range tests {

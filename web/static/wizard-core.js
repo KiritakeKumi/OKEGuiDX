@@ -1,11 +1,13 @@
 // wizard-core.js is the pure half of the new-task wizard: profile parsing and
-// validation, the #OKE tag rewriting, and the working/output path derivation.
+// validation, the episode-config checks, and the guard that refuses a .vpy
+// template without the #OKE:INPUTFILE tag.
 //
-// It is the Web UI counterpart of Task/AddTaskService.cs, Task/AddEpProfileService.cs
-// and the path block of Gui/WizardWindow.xaml.cs. The algorithm is the one
-// DECISIONS-NEEDED.md §A5 records; internal/wizard (W2) implements the same
-// algorithm server-side, and the two must agree, so nothing here touches the DOM
-// or the network and every function is unit-testable on its own.
+// It is the Web UI counterpart of Task/AddTaskService.cs and
+// Task/AddEpProfileService.cs. The #OKE tag rewriting and the working/output
+// path derivation live in internal/wizard (wizard.go), which POST
+// /api/v1/tasks/prepare and POST /api/v1/tasks both run server-side; keeping a
+// second copy of that algorithm here is what the page used to do and no longer
+// needs to, because the page now shows the server's own answer.
 //
 // The module works both as a browser classic script (it attaches OKEWizardCore to
 // window) and under Node's test runner (it fills module.exports), which is what
@@ -167,33 +169,11 @@ function normalizePath(path) {
   return joined;
 }
 
-// dirName returns the parent directory of a path, or "" when there is none.
-// Mirrors Path.GetDirectoryName for the shapes a source path can have.
-function dirName(path) {
-  const { sep } = pathStyle(path);
-  const unix = String(path).replace(/\\/g, "/").replace(/\/+$/, "");
-  const i = unix.lastIndexOf("/");
-  if (i < 0) {
-    return "";
-  }
-  if (i === 0) {
-    return sep;
-  }
-  return normalizePath(unix.slice(0, i));
-}
-
 // baseName returns the final element of a path. Mirrors FileInfo.Name.
 function baseName(path) {
   const unix = String(path).replace(/\\/g, "/").replace(/\/+$/, "");
   const i = unix.lastIndexOf("/");
   return i < 0 ? unix : unix.slice(i + 1);
-}
-
-// fileStem returns the file name without its extension.
-function fileStem(name) {
-  const base = baseName(name);
-  const i = base.lastIndexOf(".");
-  return i <= 0 ? base : base.slice(0, i);
 }
 
 // fileExt returns the extension including the dot, lowercased. Mirrors
@@ -407,223 +387,23 @@ function validateAudio(prof) {
 }
 
 // ---------------------------------------------------------------------------
-// #OKE tag rewriting (WizardWindow.WizardFinish, lines 202-270)
+// #OKE tag detection (AddTaskService.LoadVsScript)
 // ---------------------------------------------------------------------------
 
-// The three tag patterns mirror profile.InputTagPattern / ProjectDirTagPattern /
-// DebugTagPattern, which in turn mirror Constants.inputRegex and friends.
-//
-// The legacy code indexed Regex.Split's output as [0]=before, [1]=group1,
-// [2]=group2, [3]=after, and every replacement kept group1 while replacing
-// group2:
-//
-//	vsScript = dirTag[0] + dirTag[1] + "R\"" + projectDir + "\"" + dirTag[3]
-//
-// String.replace hands the callback the whole match followed by the capture
-// groups, so the piece before group1 is recovered from the match's length; the
-// result is the same expression with the two outer terms left in place.
+// TAG_INPUT mirrors profile.InputTagPattern, which in turn mirrors
+// Constants.inputRegex. The wizard used to rewrite this tag's value into every
+// generated script; that rewriting now runs server-side in internal/wizard
+// (buildVpy), so the only thing left for the page is the check LoadVsScript ran
+// before the wizard could advance: a template without the tag cannot be turned
+// into a per-source script at all.
 const TAG_INPUT = /^# *OKE:INPUTFILE([\s]+\w+[ ]*=[ ]*)(r*["'].*["'])/gim;
-const TAG_PROJECTDIR = /^# *OKE:PROJECTDIR([\s]+\w+[ ]*=[ ]*)(r*["'].*["'])/gim;
-const TAG_DEBUG = /^# *OKE:DEBUG([\s]+[\w]+[ ]*=[ ]*)(\w+)/gim;
-
-// replaceTagValue rewrites capture group2 of a tag match to value, keeping
-// everything before and after it byte for byte.
-function replaceTagValue(match, head, value, replacement) {
-  const before = match.slice(0, match.length - head.length - value.length);
-  return before + head + replacement;
-}
-
-// applyProjectDirTag rewrites the PROJECTDIR tag to the profile's directory,
-// exactly as WizardFinish did. The tag is the only place the generated script
-// learns where the project lives.
-function applyProjectDirTag(script, projectDir) {
-  return String(script).replace(TAG_PROJECTDIR, (match, head, value) =>
-    replaceTagValue(match, head, value, 'R"' + projectDir + '"')
-  );
-}
-
-// applyDebugTag rewrites the DEBUG tag's value to "None", which is what the
-// wizard did before handing the script to the engine.
-function applyDebugTag(script) {
-  return String(script).replace(TAG_DEBUG, (match, head, value) =>
-    replaceTagValue(match, head, value, "None")
-  );
-}
-
-// generateVpy renders one source's script:
-//
-//	inputTemplate[0] + inputTemplate[1] + "R\"" + inputFile + "\"" + inputTemplate[3]
-//
-// The legacy code split on inputRegex once, outside the loop, and reused the
-// template for every source; replacing the match in place gives the same result
-// because only group2 changes.
-function generateVpy(script, inputFile) {
-  const text = String(script);
-  if (!hasInputTag(text)) {
-    throw new ValidationError(
-      "vpy没有为OKEGui设计",
-      "vpy里没有#OKE:INPUTFILE的标签。",
-      "InputScript"
-    );
-  }
-  return text.replace(TAG_INPUT, (match, head, value) =>
-    replaceTagValue(match, head, value, 'R"' + inputFile + '"')
-  );
-}
 
 // hasInputTag reports whether a script carries the tag at all, which is what
-// LoadVsScript checked before the wizard could advance.
+// LoadVsScript checked before the wizard could advance. The pattern is global,
+// so lastIndex is reset to keep repeated calls from resuming mid-string.
 function hasInputTag(script) {
   TAG_INPUT.lastIndex = 0;
   return TAG_INPUT.test(String(script));
-}
-
-// ---------------------------------------------------------------------------
-// Working / output path derivation (WizardWindow.WizardFinish, lines 268-321)
-// ---------------------------------------------------------------------------
-
-// STRIP_COMPONENTS is the legacy list of directory levels that carry no
-// information. The C# code carried a "FIXME: do not hardcode this"; the value is
-// kept because it is exactly what names every existing release's working
-// directory, and changing it would rename them all.
-const STRIP_COMPONENTS = "BDBOX/BDROM/BD/BDMV/STREAM/BD_VIDEO";
-
-// VOLUME_PATTERN matches a trailing volume number. Mirrors the legacy
-// `.*Vol[.\- ]?(?<vol>\d+).*`.
-const VOLUME_PATTERN = /.*Vol[.\- ]?(\d+).*/i;
-
-// CRC32_TABLE is the standard reflected CRC-32 table (polynomial 0xEDB88320),
-// the same algorithm as the legacy CRC32/SafeProxy pair.
-const CRC32_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[i] = c >>> 0;
-  }
-  return table;
-})();
-
-// crc32 returns the CRC-32 of the UTF-8 bytes of text, mirroring
-// CRC32.Compute(Encoding.UTF8.GetBytes(...)).
-function crc32(text) {
-  let crc = 0xffffffff;
-  const bytes = typeof TextEncoder !== "undefined"
-    ? new TextEncoder().encode(String(text))
-    : Buffer.from(String(text), "utf8");
-  for (const byte of bytes) {
-    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-// hex8 renders a CRC the way C# did with ToString("X8").
-function hex8(value) {
-  return (value >>> 0).toString(16).toUpperCase().padStart(8, "0");
-}
-
-// escapeRegExp mirrors Regex.Escape closely enough for a path component.
-function escapeRegExp(text) {
-  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// stripCommonComponents removes the generic directory levels. Mirrors the
-// per-component `Regex.Replace(path, @"[/\\]" + comp + @"[/\\]", "\\")` loop,
-// including the way the replacement swallows the surrounding separators and the
-// way a removal can expose a new match: "BDMV\BDMV\STREAM\x" loses both levels,
-// because after the first is rewritten the second is surrounded by separators
-// again.
-//
-// Both separators are matched, and the comparison ignores ASCII case: the strip
-// list is written in the case a real BD tree uses, and a tree spelled the other
-// way should still have its levels removed rather than silently kept.
-function stripCommonComponents(inputSuffixPath, sep) {
-  let out = inputSuffixPath;
-  for (const comp of STRIP_COMPONENTS.split(/[\\/]/)) {
-    if (!comp) {
-      continue;
-    }
-    const needle = escapeRegExp(comp).replace(/[A-Za-z]/g, (c) => "[" + c + c.toLowerCase() + "]");
-    out = out.replace(new RegExp("[/\\\\]" + needle + "[/\\\\]", "g"), sep);
-  }
-  return out;
-}
-
-// derivePaths reproduces the path block of WizardFinish for one source:
-//
-//  1. inputSuffixPath = inputFile with ':' replaced by '_';
-//  2. the common path components are stripped;
-//  3. when more than three components remain and reducePath is on, the middle
-//     levels collapse into a CRC32-tagged directory;
-//  4. working = projectDir + the result;
-//  5. output  = working with a "/._/" (or "\_\" ) level replaced by "output";
-//  6. the script is working + "-" + MMddHHmm + ".vpy".
-//
-// The C# code created both directories and wrote the script here; a browser can
-// do neither, so this returns the paths plus the rendered script, and the caller
-// decides what to do with them.
-//
-// reduceMap is the entry the legacy code appended to ReducePathMap.log, or null.
-function derivePaths(inputFile, projectDir, reducePath) {
-  const { sep } = pathStyle(projectDir);
-  let inputSuffixPath = String(inputFile).replace(/:/g, "_");
-  inputSuffixPath = stripCommonComponents(inputSuffixPath, sep);
-
-  const components = inputSuffixPath.split(/[\\/]/).filter((c) => c !== "");
-  let reduceMap = null;
-  if (components.length > 3 && reducePath) {
-    // components[0] is the drive, components[length-1] the file name, and
-    // components[1 .. length-2] is the effective path to be reduced.
-    const prefix = components.slice(1, components.length - 2).join(sep);
-    const last = components[components.length - 2];
-    let effective = last;
-    if (!VOLUME_PATTERN.test(last)) {
-      // The last level is preserved and the CRC of the prefix is prepended to
-      // keep two same-named episodes apart.
-      const crc = crc32(prefix);
-      effective = hex8(crc) + "-" + last;
-      reduceMap = { crc, prefix };
-    }
-    inputSuffixPath = [components[0], effective, components[components.length - 1]].join(sep);
-  }
-
-  const working = combineLikeDotNet(projectDir, inputSuffixPath);
-  // Regex.Replace(newPath, @"[/\\]._[/\\]", "\\output\\"): a directory level
-  // literally named "._" becomes "output".
-  const output = normalizePath(
-    working.replace(/[\\/]\._[\\/]/g, sep + "output" + sep)
-  );
-  return { working, output, reduceMap };
-}
-
-// combineLikeDotNet mirrors Path.Combine: a second argument that is rooted wins
-// over the first. Go's filepath.Join — and a plain join — would instead append
-// it, which would move a source tree that already lives outside the project
-// directory underneath it. A UNC source or a source on a volume the strip list
-// does not recognise keeps the legacy behaviour of working in place.
-function combineLikeDotNet(dir, suffix) {
-  if (isAbsolute(suffix)) {
-    return normalizePath(suffix);
-  }
-  return normalizePath(joinPath(dir, suffix));
-}
-
-// timestamp renders the "MMddHHmm" suffix the legacy code appended to the
-// generated script's name (DateTime.Now.ToString("MMddHHmm")).
-function timestamp(now) {
-  const at = now instanceof Date ? now : new Date();
-  const pad = (v) => String(v).padStart(2, "0");
-  return (
-    pad(at.getMonth() + 1) + pad(at.getDate()) + pad(at.getHours()) + pad(at.getMinutes())
-  );
-}
-
-// scriptPath is `working + "-" + MMddHHmm + ".vpy"`. The legacy code appended the
-// suffix to the whole path, so the file name is "<source>-<stamp>.vpy".
-function scriptPath(working, now) {
-  return working + "-" + timestamp(now) + ".vpy";
 }
 
 // ---------------------------------------------------------------------------
@@ -789,9 +569,7 @@ const OKEWizardCore = {
   isAbsolute,
   joinPath,
   normalizePath,
-  dirName,
   baseName,
-  fileStem,
   fileExt,
   resolveRelative,
   // profile validation
@@ -803,20 +581,7 @@ const OKEWizardCore = {
   resolveInputFiles,
   // tags
   TAG_INPUT,
-  TAG_PROJECTDIR,
-  TAG_DEBUG,
-  applyProjectDirTag,
-  applyDebugTag,
-  generateVpy,
-  hasInputTag,  // derived paths
-  STRIP_COMPONENTS,
-  crc32,
-  hex8,
-  stripCommonComponents,
-  derivePaths,
-  combineLikeDotNet,
-  timestamp,
-  scriptPath,
+  hasInputTag,
   // episode config
   validateEpisodeConfig,
   mergeSlices,

@@ -269,186 +269,15 @@ test("validateProfile resolves an absolute input against no directory", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tag rewriting (WizardWindow.WizardFinish)
+// #OKE tag detection (AddTaskService.LoadVsScript)
 // ---------------------------------------------------------------------------
+// The tag rewriting and the path derivation moved server-side (internal/wizard),
+// so the page only keeps the guard LoadVsScript applied before the wizard could
+// advance.
 
-test("generateVpy replaces the INPUTFILE value and keeps everything else", () => {
-  const got = Core.generateVpy(vpyTemplate, "D:\\proj\\ep01\\00001.m2ts");
-  // The legacy expression is group1 + "R\"" + value + "\"", and group1 already
-  // carries the "=", so the generated line has no space after it.
-  assert.ok(got.includes('#OKE:INPUTFILE arg=R"D:\\proj\\ep01\\00001.m2ts"'), got);
-  // The tag itself survives, so the next pass still finds it.
-  assert.ok(Core.hasInputTag(got));
-  // Every other line is untouched.
-  assert.ok(got.includes("#OKE:INPROJECTDIR"));
-  assert.ok(got.includes("clip = core.lsmas.LWLibavSource(arg)"));
-});
-
-test("generateVpy keeps the spacing the template used", () => {
-  const got = Core.generateVpy("#OKE:INPUTFILE   arg   =   r''\n", "x.m2ts");
-  assert.ok(got.includes('#OKE:INPUTFILE   arg   =   R"x.m2ts"'), got);
-});
-
-test("generateVpy accepts the single-quoted and unquoted-r spellings", () => {
-  const cases = ["#OKE:INPUTFILE arg=''", '#OKE:INPUTFILE arg=""', "# oke:inputfile arg=''"];
-  for (const line of cases) {
-    const got = Core.generateVpy(line + "\n", "x.m2ts");
-    assert.ok(got.includes('R"x.m2ts"'), line + " → " + got);
-  }
-});
-
-test("generateVpy refuses a script without the tag", () => {
-  assert.throws(
-    () => Core.generateVpy("# just a comment\n", "x.m2ts"),
-    (err) => err.summary === "vpy没有为OKEGui设计" && err.field === "InputScript"
-  );
-});
-
-test("applyProjectDirTag rewrites the PROJECTDIR value", () => {
-  const got = Core.applyProjectDirTag(vpyTemplate, "D:\\WORKS\\ep01");
-  assert.ok(got.includes('#OKE:PROJECTDIR arg=R"D:\\WORKS\\ep01"'), got);
-  // The INPUTFILE tag is a different tag and must not be touched.
-  assert.ok(got.includes('#OKE:INPUTFILE arg=r""'));
-});
-
-test("applyDebugTag rewrites the DEBUG value to None", () => {
-  const got = Core.applyDebugTag(vpyTemplate);
-  assert.ok(got.includes("#OKE:DEBUG flag=None"), got);
-  assert.ok(got.includes("#OKE:DEBUG flag=None"));
-});
-
-test("applyDebugTag leaves the other tags alone", () => {
-  const got = Core.applyDebugTag(vpyTemplate);
-  assert.ok(got.includes('#OKE:PROJECTDIR arg=r""'));
-  assert.ok(got.includes('#OKE:INPUTFILE arg=r""'));
-});
-
-test("the tag pipeline is order-independent for the fixture", () => {
-  const a = Core.applyDebugTag(Core.applyProjectDirTag(vpyTemplate, "D:\\p"));
-  const b = Core.applyProjectDirTag(Core.applyDebugTag(vpyTemplate), "D:\\p");
-  assert.equal(a, b);
-});
-
-// ---------------------------------------------------------------------------
-// Path derivation (WizardWindow.WizardFinish, lines 268-321)
-// ---------------------------------------------------------------------------
-
-test("crc32 matches the standard check value", () => {
-  // CRC-32/ISO-HDLC of "123456789" is 0xCBF43926; the legacy code used the same
-  // reflected polynomial (Utils/SafeProxy.cs, Poly = 0xEDB88320).
-  assert.equal(Core.hex8(Core.crc32("123456789")), "CBF43926");
-  assert.equal(Core.hex8(Core.crc32("")), "00000000");
-});
-
-test("crc32 hashes UTF-8 bytes, as Encoding.UTF8.GetBytes did", () => {
-  // The C# code hashed Encoding.UTF8.GetBytes(prefix); a non-ASCII prefix must
-  // therefore hash its multi-byte form, not its UTF-16 code units.
-  const got = Core.crc32("日本");
-  assert.equal(got, Core.crc32("\u65e5\u672c"));
-  assert.notEqual(got, Core.crc32(""));
-});
-
-test("stripCommonComponents drops the generic levels", () => {
-  const got = Core.stripCommonComponents(
-    "D:\\BDMV\\BDBOX\\ep01\\BDROM\\BDMV\\STREAM\\00001.m2ts",
-    "\\"
-  );
-  assert.equal(got, "D:\\ep01\\00001.m2ts");
-});
-
-test("derivePaths without reduction keeps the stripped path", () => {
-  // reducePath is off, so step 3 of the algorithm is skipped entirely.
-  const got = Core.derivePaths(
-    "D:\\BDBOX\\ep01\\BDMV\\STREAM\\00001.m2ts",
-    "D:\\WORKS\\proj\\ep01",
-    false
-  );
-  assert.equal(got.working, "D:\\WORKS\\proj\\ep01\\D_\\ep01\\00001.m2ts");
-  assert.equal(got.reduceMap, null);
-});
-
-test("derivePaths keeps a volume-named last level unchanged", () => {
-  // A last level matching `.*Vol[.\- ]?(\d+).*` is kept as-is, no map entry is
-  // produced, and the prefix levels are dropped — the volume alone identifies
-  // the disc (WizardWindow.xaml.cs:289-306).
-  const got = Core.derivePaths(
-    "D:\\BDMV\\BD\\disc\\Vol.1\\BDMV\\STREAM\\00001.m2ts",
-    "D:\\proj",
-    true
-  );
-  assert.equal(got.working, "D:\\proj\\D_\\Vol.1\\00001.m2ts");
-  assert.equal(got.reduceMap, null);
-});
-
-test("derivePaths reduces a long path and reports the map entry", () => {
-  // Four components survive the strip, so the middle levels collapse into a
-  // CRC32-tagged directory: `[drive, CRC32(prefix)-last, file]`.
-  const got = Core.derivePaths(
-    "D:\\BDMV\\BD\\disc1\\disc2\\BDMV\\STREAM\\00001.m2ts",
-    "D:\\proj",
-    true
-  );
-  assert.ok(got.reduceMap, "a reduce map entry is expected");
-  assert.equal(got.reduceMap.prefix, "disc1");
-  const expected = "D:\\proj\\D_\\" + Core.hex8(Core.crc32("disc1")) + "-disc2\\00001.m2ts";
-  assert.equal(got.working, expected);
-});
-
-test("derivePaths hashes the prefix as UTF-8, like Encoding.UTF8.GetBytes", () => {
-  const got = Core.derivePaths(
-    "D:\\BDMV\\BD\\第1卷\\disc2\\BDMV\\STREAM\\00001.m2ts",
-    "D:\\proj",
-    true
-  );
-  assert.equal(got.reduceMap.prefix, "第1卷");
-  assert.ok(got.working.includes("-disc2\\"), got.working);
-});
-
-test("derivePaths rewrites a '._' level into output", () => {
-  const got = Core.derivePaths(
-    "D:\\proj\\._\\BDMV\\STREAM\\00001.m2ts",
-    "D:\\proj",
-    false
-  );
-  assert.equal(got.working, "D:\\proj\\D_\\proj\\._\\00001.m2ts");
-  assert.equal(got.output, "D:\\proj\\D_\\proj\\output\\00001.m2ts");
-});
-
-test("derivePaths lets a rooted source win over the project directory", () => {
-  // Path.Combine semantics: a rooted second argument wins. This is what the
-  // legacy code did, and internal/wizard reproduces it, so a POSIX source on a
-  // POSIX host works in place rather than being nested under the project.
-  // "bd" is stripped too: it is the "BD" entry of the strip list.
-  const got = Core.derivePaths("/srv/bd/BDMV/STREAM/00001.m2ts", "/srv/proj", false);
-  assert.equal(got.working, "/srv/00001.m2ts");
-});
-
-test("stripCommonComponents ignores ASCII case", () => {
-  // The strip list is written the way a real BD tree spells it; a tree spelled
-  // the other way must still lose its levels rather than keep them.
-  const got = Core.stripCommonComponents("D:\\bdmv\\stream\\00001.m2ts", "\\");
-  assert.equal(got, "D:\\00001.m2ts");
-});
-
-test("derivePaths mirrors a rooted source outside the project directory", () => {
-  // Path.Combine lets a rooted second argument win, so a UNC source works in
-  // place instead of being nested under the project directory.
-  const got = Core.derivePaths("\\\\server\\share\\BDMV\\STREAM\\00001.m2ts", "D:\\proj", false);
-  assert.equal(got.working, "\\\\server\\share\\00001.m2ts");
-});
-
-test("derivePaths leaves a short path alone", () => {
-  // Three components or fewer never take the reduce branch.
-  const got = Core.derivePaths("C:\\ep01\\00001.m2ts", "D:\\proj", true);
-  assert.equal(got.working, "D:\\proj\\C_\\ep01\\00001.m2ts");
-  assert.equal(got.reduceMap, null);
-});
-
-test("scriptPath appends the MMddHHmm stamp to the working path", () => {
-  // DateTime.Now.ToString("MMddHHmm") is zero-padded to two digits per field.
-  const stamp = new Date(2026, 0, 5, 9, 7);
-  assert.equal(Core.timestamp(stamp), "01050907");
-  assert.equal(Core.scriptPath("D:\\proj\\ep01\\00001.m2ts", stamp), "D:\\proj\\ep01\\00001.m2ts-01050907.vpy");
+test("hasInputTag accepts the fixture and refuses a plain script", () => {
+  assert.equal(Core.hasInputTag(vpyTemplate), true);
+  assert.equal(Core.hasInputTag("# just a comment\nclip.set_output()\n"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -475,15 +304,12 @@ test("normalizePath collapses dots and doubles", () => {
   }
 });
 
-test("dirName and baseName split a path the way the .NET helpers did", () => {
-  assert.equal(Core.dirName("D:\\proj\\00001.m2ts"), "D:\\proj");
-  assert.equal(Core.dirName("00001.m2ts"), "");
+test("baseName splits a path the way FileInfo.Name did", () => {
   assert.equal(Core.baseName("D:\\proj\\00001.m2ts"), "00001.m2ts");
   assert.equal(Core.baseName("/srv/x.mkv"), "x.mkv");
 });
 
-test("fileStem and fileExt ignore a leading dot", () => {
-  assert.equal(Core.fileStem("00001.m2ts"), "00001");
+test("fileExt ignores a leading dot", () => {
   assert.equal(Core.fileExt("00001.m2ts"), ".m2ts");
   assert.equal(Core.fileExt("ARCHIVE.MKV"), ".mkv");
   assert.equal(Core.fileExt(".gitignore"), "");

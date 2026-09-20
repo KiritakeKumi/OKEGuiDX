@@ -135,12 +135,6 @@
           </p>
         </div>
 
-        <div class="row">
-          <label class="inline">
-            <input id="opt-reduce-path" type="checkbox" checked />
-            缩短过长的输入路径（reducePath，与 <code>GET /api/v1/config</code> 同步）
-          </label>
-        </div>
 
         <h3>推导出的路径</h3>
         <table>
@@ -156,9 +150,9 @@
         <p id="paths-empty" class="muted">还没有选中输入文件。</p>
 
         <p class="muted">
-          页面无法创建目录，也无法把生成的 vpy 写到绝对路径上，所以这两步要手工完成：
-          点“下载 .vpy”拿到脚本，把它放到 <code>working_path_prefix</code> 指向的位置，
-          并确保它上一级的目录存在（C# 的向导会自动建目录，HTTP 接口不会）。
+          这张表是服务器的推导结果（<code>POST /api/v1/tasks/prepare</code>），与新建任务时
+          服务器实际使用的一致。点“完成”后，服务器会为每个输入文件写出各自的 .vpy
+          并创建所需目录（<code>write_vpy</code>），页面不再手工下载脚本。
         </p>
 
         <div class="actions">

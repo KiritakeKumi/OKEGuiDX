@@ -7,8 +7,10 @@
 // task per request (internal/api/tasks.go), so the loop over the sources lives
 // here, in the client, and a partial failure is reported per file.
 //
-// This file is the DOM and network layer only. Everything it computes comes from
-// OKEWizardCore (wizard-core.js), which is pure and unit-tested separately.
+// This file is the DOM and network layer only. The profile checks come from
+// OKEWizardCore (wizard-core.js), which is pure and unit-tested separately; the
+// derived paths come from the server's own assembly pass, which the page asks
+// for with POST /api/v1/tasks/prepare, so the page does not re-implement it.
 
 "use strict";
 
@@ -324,60 +326,151 @@ function updateFinishState() {
 // Step 3: derived paths, generated scripts and the episode config
 // ---------------------------------------------------------------------------
 
-// reducePathEnabled reads the reducePath switch. It defaults to the value
-// platform.DefaultConfig uses (true) and follows GET /api/v1/config when the
-// daemon answers.
-function reducePathEnabled() {
-  return $("opt-reduce-path").checked;
-}
+// PREVIEW_DELAY is the debounce for the preview request. The table is rebuilt on
+// every keystroke in the base-directory field and on every selection change, and
+// each rebuild is a server round trip, so the calls are coalesced. Without it,
+// typing a base directory a character at a time would send one request per
+// character. 200 ms is short enough that the table still feels live and long
+// enough to swallow a burst of typing.
+const PREVIEW_DELAY = 200;
 
-// derivedFor returns the per-source paths the page previews. It applies the
-// same tag rewriting and path derivation WizardFinish did, so the table shows
-// the operator what the server is about to produce.
+// pathsTimer coalesces a burst of repaints into one request; pathsTicket numbers
+// the requests so a slow answer that arrives after a newer one cannot overwrite
+// it. Only the answer whose ticket is still current is drawn.
+let pathsTimer = 0;
+let pathsTicket = 0;
+
+// renderPaths schedules the per-source preview. The request itself runs in
+// refreshPaths.
 //
-// The values here are a preview only. POST /tasks re-derives them with
-// internal/wizard (write_vpy) and its answer is the one the task stores, so
-// nothing from this function is sent back to the server.
-function derivedFor(inputFile) {
-  const paths = Core.derivePaths(inputFile, state.baseDir, reducePathEnabled());
-  return {
-    input: inputFile,
-    working: paths.working,
-    output: paths.output,
-  };
+// The old rows are deliberately left on screen for the debounce interval rather
+// than cleared here: clearing them would blink the table empty on every
+// keystroke. The empty-state message is updated immediately, because it needs no
+// network.
+function renderPaths() {
+  $("paths-empty").hidden = selectedInputs().length > 0;
+  if (pathsTimer) {
+    clearTimeout(pathsTimer);
+  }
+  pathsTimer = setTimeout(refreshPaths, PREVIEW_DELAY);
 }
 
-// renderPaths draws the per-source table of derived paths. It is a preview: the
-// server derives the values it stores, and these are shown only so the operator
-// can see where the work will land before committing to it.
-function renderPaths() {
-  const tbody = $("path-rows");
-  tbody.replaceChildren();
+// refreshPaths draws the per-source table from the server's own derivation.
+//
+// It is the same assembly POST /api/v1/tasks runs (wizard.Derive), so the table
+// shows exactly the paths the task will store instead of a second implementation
+// of the same algorithm. The endpoint writes and queues nothing, which is what
+// makes it safe to call while the operator is still editing.
+async function refreshPaths() {
+  pathsTimer = 0;
+  const ticket = ++pathsTicket;
   const inputs = selectedInputs();
+  const tbody = $("path-rows");
   $("paths-empty").hidden = inputs.length > 0;
 
-  for (const inputFile of inputs) {
-    let derived;
-    try {
-      derived = derivedFor(inputFile);
-    } catch (err) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 3;
-      td.textContent = `${inputFile} → ${toValidationError(err).summary}`;
-      tr.appendChild(td);
-      tbody.appendChild(tr);
-      continue;
-    }
+  if (inputs.length === 0) {
+    tbody.replaceChildren();
+    return;
+  }
 
+  // The body is the profile-carrying half of buildTaskBody. It is built here
+  // rather than by calling buildTaskBody because name and write_vpy mean nothing
+  // to /tasks/prepare, and because the episode config is deliberately left out:
+  // it only affects the encode, not the derived paths, so folding it in would
+  // make the preview fail on a config the operator is still typing.
+  const body = {
+    profile_text: state.profileText,
+    base_dir: state.baseDir,
+    inputs: inputs,
+  };
+
+  let tasks;
+  try {
+    tasks = await postPrepare(body);
+  } catch (err) {
+    // A daemon that is unreachable or refuses the profile is drawn as one row
+    // per selected source, the shape a per-source derivation failure used to
+    // draw. The failure never escapes as a rejected promise, so the page cannot
+    // die on an unhandled rejection; profile-level problems keep going through
+    // showError in parseLoadedProfile.
+    if (ticket !== pathsTicket) {
+      return;
+    }
+    tbody.replaceChildren();
+    const message = pathErrorMessage(err);
+    for (const inputFile of inputs) {
+      tbody.appendChild(errorPathRow(inputFile, message));
+    }
+    return;
+  }
+
+  // A stale answer must not overwrite a newer one: the ticket makes that race
+  // impossible without comparing payloads.
+  if (ticket !== pathsTicket) {
+    return;
+  }
+  renderPathRows(tbody, inputs, tasks);
+}
+
+// renderPathRows draws one row per selected source from the server's tasks. A
+// source the server did not return keeps its row with empty prefixes rather than
+// disappearing, so the row count still matches the selection.
+function renderPathRows(tbody, inputs, tasks) {
+  const byInput = new Map();
+  for (const task of tasks) {
+    byInput.set(task.input_file, task);
+  }
+
+  tbody.replaceChildren();
+  for (const inputFile of inputs) {
+    const task = byInput.get(inputFile);
+    const cells = task
+      ? [task.name, task.working_path_prefix, task.output_path_prefix]
+      : [Core.baseName(inputFile), "", ""];
     const tr = document.createElement("tr");
-    for (const text of [Core.baseName(inputFile), derived.working, derived.output]) {
+    for (const text of cells) {
       const td = document.createElement("td");
       td.textContent = text;
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
   }
+}
+
+// errorPathRow is the table's failure row: one cell spanning the three columns,
+// naming the source and the reason. It mirrors the row the page drew when a
+// single source could not be derived, before the derivation moved to the server.
+function errorPathRow(inputFile, message) {
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = 3;
+  td.textContent = `${inputFile} → ${message}`;
+  tr.appendChild(td);
+  return tr;
+}
+
+// pathErrorMessage keeps an unexpected exception displayable in the same shape
+// the banner uses: the summary, and the detail when there is one.
+function pathErrorMessage(err) {
+  const error = toValidationError(err);
+  return error.detail ? `${error.summary}：${error.detail}` : error.summary;
+}
+
+// postPrepare asks the daemon for every selected source's derivation without
+// writing or queueing anything. It is the preview counterpart of postTask: the
+// same profile-carrying fields and the same error decoding, so a refusal reads
+// the same in the table as it would in the result list.
+async function postPrepare(body) {
+  const resp = await fetch(API + "/tasks/prepare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw Core.errorFromBody(payload, `HTTP ${resp.status}`);
+  }
+  return payload.tasks || [];
 }
 
 // episodeConfig builds the EpisodeConfig for every task this wizard creates. The
@@ -585,26 +678,6 @@ function wireDropZone() {
   });
 }
 
-// loadConfigDefaults follows the daemon's reducePath switch, which decides
-// whether a long source path is shortened. It falls back to the default
-// platform.DefaultConfig uses.
-async function loadConfigDefaults() {
-  try {
-    const resp = await fetch(API + "/config", { headers: { Accept: "application/json" } });
-    if (!resp.ok) {
-      return;
-    }
-    const payload = await resp.json();
-    if (payload.config && typeof payload.config.reducePath === "boolean") {
-      $("opt-reduce-path").checked = payload.config.reducePath;
-      renderPaths();
-    }
-  } catch (err) {
-    // A wizard that cannot read the settings still works; the checkbox keeps its
-    // default.
-  }
-}
-
 function wire() {
   $("profile-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
@@ -652,21 +725,16 @@ function wire() {
   $("ep-reencode").addEventListener("change", (e) => {
     $("reencode-fields").hidden = !e.target.checked;
   });
-  $("opt-reduce-path").addEventListener("change", renderPaths);
-
   $("wizard-finish").addEventListener("click", createTasks);
   wireDropZone();
-  loadConfigDefaults();
 }
 
 wire();
 
-// The DOM layer's surface, exposed so a test can drive the page and so the
-// derived paths are inspectable from the console. The pure half lives in
-// window.OKEWizardCore.
+// The DOM layer's surface, exposed so a test can drive the page. The pure half
+// lives in window.OKEWizardCore.
 window.OKEWizard = {
   state,
-  derivedFor,
   selectedInputs,
   episodeConfig,
   profileTextWithConfig,
