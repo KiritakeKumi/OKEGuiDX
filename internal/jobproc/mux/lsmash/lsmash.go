@@ -247,6 +247,17 @@ func (p *Processor) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 	p.run = child
 	p.mu.Unlock()
 
+	// Cancellation has to kill the child: Finish blocks on its pipes.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = child.Kill()
+		case <-stopWatch:
+		}
+	}()
+
 	// The legacy processor parsed both streams, so both are parsed here. The
 	// handler runs on the two stream goroutines, so the first structured error
 	// it produces is recorded under a mutex.

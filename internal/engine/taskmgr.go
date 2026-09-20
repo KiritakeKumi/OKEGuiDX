@@ -449,6 +449,36 @@ func (m *TaskManager) removeLocked(idx int) {
 	m.tasks = m.tasks[:last]
 }
 
+// CancelWaitingTask cancels a task that has not started: it takes the terminal
+// state the pool writes for a stopped task ("已终止"), so a client needs one
+// rule for every cancelled task whatever stage it was in.
+//
+// The state change happens under the queue lock and only for a waiting task,
+// which is what makes the operation atomic with respect to a worker claiming
+// the task: either this call sees it waiting and cancels it, or GetNextTask
+// has already marked it running and the worker pool owns the cancellation.
+// Replacing the check with a read followed by Update would race, because Update
+// runs its function outside the lock and writes the whole task back.
+//
+// It reports false when the task is unknown or no longer waiting.
+func (m *TaskManager) CancelWaitingTask(id model.TaskID) (bool, error) {
+	m.mu.Lock()
+	idx := m.indexOfLocked(id)
+	if idx < 0 || m.tasks[idx].Task.Status.Progress != model.TaskWaiting {
+		m.mu.Unlock()
+		return false, nil
+	}
+	t := &m.tasks[idx].Task
+	t.Status.Progress = model.TaskError
+	t.Status.Status = statusTerminated
+	m.mu.Unlock()
+
+	if err := m.commit(); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
 // SetEnabled turns a task on or off. Like the legacy IsEnabled property, the
 // change is silently ignored while the task is running.
 func (m *TaskManager) SetEnabled(id model.TaskID, enabled bool) error {

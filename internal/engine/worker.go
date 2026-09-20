@@ -145,6 +145,12 @@ type WorkerManager struct {
 	// worker goroutine has finished.
 	waiters []chan struct{}
 
+	// cancelRequested holds tasks whose cancellation arrived while a worker had
+	// claimed them but had not registered them yet (the gap between
+	// GetNextTask and beginTask). beginTask consumes the entry and refuses the
+	// task, which settles it without ever submitting it to the executor.
+	cancelRequested map[model.TaskID]struct{}
+
 	tempCounter int
 
 	sink        func(model.StatusEvent)
@@ -160,12 +166,13 @@ func NewWorkerManager(exec Executor, tm *TaskManager, numa *platform.Numa) *Work
 		numa = platform.NewNuma(false)
 	}
 	return &WorkerManager{
-		exec:     exec,
-		tm:       tm,
-		numa:     numa,
-		workers:  make(map[string]Worker),
-		runs:     make(map[string]*workerRun),
-		liveRuns: make(map[*workerRun]struct{}),
+		exec:            exec,
+		tm:              tm,
+		numa:            numa,
+		workers:         make(map[string]Worker),
+		runs:            make(map[string]*workerRun),
+		liveRuns:        make(map[*workerRun]struct{}),
+		cancelRequested: make(map[model.TaskID]struct{}),
 	}
 }
 
@@ -224,6 +231,10 @@ func (m *WorkerManager) Start() bool {
 // immediately, leaving the actual processes to SubProcessService.KillAll() from
 // the UI; a daemon has no such safety net, so this port waits until the pool is
 // quiescent before returning.
+//
+// A task that is still waiting is deliberately left alone: the legacy Stop only
+// cancelled the background workers, and the queue kept the rest for a later
+// Start. Cancelling an individual waiting task is CancelTask's job.
 //
 // The wait is unbounded: a worker only exits once its Executor closes the event
 // channel, which LocalExecutor always does. Use StopContext when a shutdown
@@ -286,6 +297,26 @@ func (m *WorkerManager) beginStop() <-chan struct{} {
 		t.cancel()
 	}
 	return wait
+}
+
+// cancelWaitingTasks puts every waiting task into the state a stopped task has.
+// It is what makes CancelAll complete for a client that asked for the whole run
+// to stop: without it the tasks that never started would run on the next Start,
+// which is not what an operator who pressed stop asked for. A later Start still
+// works; it simply finds nothing waiting.
+func (m *WorkerManager) cancelWaitingTasks() {
+	waiting := make([]model.TaskID, 0, 8)
+	for _, t := range m.tm.Snapshot() {
+		if t.Status.Progress == model.TaskWaiting {
+			waiting = append(waiting, t.ID)
+		}
+	}
+
+	for _, id := range waiting {
+		if _, err := m.tm.CancelWaitingTask(id); err != nil {
+			log.Warn("无法取消等待中的任务", "task", id, "err", err)
+		}
+	}
 }
 
 // IsRunning reports whether the pool is running. Like the legacy property it is
@@ -489,6 +520,14 @@ func (m *WorkerManager) beginTask(run *workerRun, id model.TaskID, cancel contex
 	defer m.mu.Unlock()
 	run.taskID = id
 	run.taskCancel = cancel
+	// A cancel that arrived while the task was being claimed wins over the
+	// submission: the task goes to the terminal state a stopped task has
+	// instead of running.
+	if _, refused := m.cancelRequested[id]; refused {
+		delete(m.cancelRequested, id)
+		run.cancelled = true
+		return false
+	}
 	if run.stopped || run.ctx.Err() != nil {
 		run.cancelled = true
 		return false
@@ -831,6 +870,108 @@ func (m *WorkerManager) StopWorker(name string) {
 		taskCancel()
 	}
 	log.Debug("已终止"+name, "worker", name)
+}
+
+// CancelAll stops the whole run: every running task is cancelled and every
+// waiting task is cancelled with it, so a client that asked for a stop gets a
+// queue with nothing left to run. It is the API's POST /pool/stop and the
+// counterpart of CancelTask for the whole pool.
+//
+// StopContext only cancels the tasks a worker is running (the legacy
+// behaviour); the waiting ones are settled here. Both halves are bounded by ctx.
+func (m *WorkerManager) CancelAll(ctx context.Context) error {
+	err := m.StopContext(ctx)
+	m.cancelWaitingTasks()
+	return err
+}
+
+// CancelTask stops one task by its id, whichever stage it is in. It is the
+// single-task counterpart of Stop and the API's POST /tasks/{id}/cancel:
+// StopWorker is keyed by worker, which a REST client does not know.
+//
+//   - a task a worker is running is cancelled exactly like StopWorker does it:
+//     the executor is asked to stop, the task context is cancelled, and the
+//     worker writes the "已终止" state once its event stream closes. The worker
+//     keeps its slot, so the pool stays usable for the rest of the queue;
+//   - a task still waiting is cancelled by the queue itself
+//     (TaskManager.CancelWaitingTask), which is atomic against a worker
+//     claiming it.
+//
+// The bool reports whether this call cancelled the task; it is false for an
+// unknown task and for one that already reached a terminal state. Callers
+// distinguish those two with a queue lookup, because "no longer running" is a
+// conflict while "not in the queue" is a missing resource.
+func (m *WorkerManager) CancelTask(id model.TaskID) (bool, error) {
+	if id.IsZero() {
+		return false, nil
+	}
+	// A task that is neither waiting nor running is already settled; touching
+	// it would turn a finished task into a cancelled one.
+	if task, ok := m.tm.Task(id); !ok || task.Status.Progress == model.TaskFinished || task.Status.Progress == model.TaskError {
+		return false, nil
+	}
+
+	m.mu.Lock()
+	var (
+		taskID     model.TaskID
+		taskCancel context.CancelFunc
+	)
+	if run := m.workerRunOfLocked(id); run != nil {
+		taskID, taskCancel = run.taskID, run.taskCancel
+		run.cancelled = true
+	}
+	m.mu.Unlock()
+
+	if taskID.IsZero() {
+		// No worker owns it yet. It is either still waiting, or a worker has
+		// claimed it and is between GetNextTask and beginTask; the request is
+		// recorded so beginTask can refuse it, and the queue decides the
+		// waiting case. A task that is genuinely neither (already settled) is
+		// reported as not cancelled.
+		m.mu.Lock()
+		m.cancelRequested[id] = struct{}{}
+		m.mu.Unlock()
+
+		cancelled, err := m.tm.CancelWaitingTask(id)
+		if err != nil || cancelled {
+			return cancelled, err
+		}
+		// The queue says it is not waiting any more, so either a worker owns it
+		// now (and will see cancelRequested) or it has settled. Check once more
+		// whether a worker picked it up in the meantime; if not, drop the
+		// request so the map cannot grow.
+		m.mu.Lock()
+		owned := m.ownsTaskLocked(id)
+		if !owned {
+			delete(m.cancelRequested, id)
+		}
+		m.mu.Unlock()
+		return owned, nil
+	}
+
+	m.cancelExecutorTask(taskID)
+	if taskCancel != nil {
+		taskCancel()
+	}
+	log.Debug("已终止任务", "task", id)
+	return true, nil
+}
+
+// workerRunOfLocked returns the run that currently owns a task, or nil.
+// Callers must hold m.mu.
+func (m *WorkerManager) workerRunOfLocked(id model.TaskID) *workerRun {
+	for _, run := range m.runs {
+		if run.taskID == id {
+			return run
+		}
+	}
+	return nil
+}
+
+// ownsTaskLocked reports whether a worker has registered the task as its
+// current one. Callers must hold m.mu.
+func (m *WorkerManager) ownsTaskLocked(id model.TaskID) bool {
+	return m.workerRunOfLocked(id) != nil
 }
 
 // StopAllWorker cancels every worker that is allowed to take work, mirroring

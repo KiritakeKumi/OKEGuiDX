@@ -17,6 +17,7 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/node"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/wizard"
 )
 
 // runOptions are the flags of `okegui run`.
@@ -82,6 +83,15 @@ func (a *application) runCommand(args []string) error {
 			fmt.Fprintf(a.stdout, "  %s  %s\n", lt.task.Name, lt.task.Status.Input)
 		}
 		return nil
+	}
+
+	// The wizard's finishing step, which a headless run has to do for itself:
+	// every source gets its own generated .vpy and the two path prefixes the
+	// pipeline requires. It runs after the dry-run branch so a validation-only
+	// run still touches nothing.
+	tasks, err = assembleTasks(tasks, s.appCfg.ReducePath)
+	if err != nil {
+		return err
 	}
 
 	return a.execute(s, &o, tasks)
@@ -250,8 +260,13 @@ func loadTasks(paths []string, caps node.Capabilities) ([]loadedTask, error) {
 		// The queue holds one row per source file, which is what the legacy
 		// wizard produced: one TaskDetail per InputFile, each with its own
 		// generated .vpy and its own output name.
+		//
+		// Each row needs its own id: profile.ToModel assigned one to the base,
+		// and the queue rejects a second task with an id it already holds, so a
+		// profile with several sources would otherwise queue only its first.
 		for _, input := range p.InputFiles {
 			task := *base
+			task.ID = model.NewTaskID()
 			task.Inputs = []model.FileRef{model.NewFileRef(input)}
 			task.Status.Input = task.Inputs[0]
 			task.Status.Output = outputRef(p, input)
@@ -263,6 +278,71 @@ func loadTasks(paths []string, caps node.Capabilities) ([]loadedTask, error) {
 	}
 	if len(tasks) == 0 {
 		return nil, fail(exitUsage, "没有可执行的任务：profile 里没有指定输入文件")
+	}
+	return tasks, nil
+}
+
+// assembleTasks runs the wizard's finishing step for every profile a run was
+// given: the per-source .vpy is generated and written, and the two path
+// prefixes are filled in on the profile the task carries.
+//
+// Without it a headless run consumes only profiles that were assembled by hand
+// (DECISIONS-NEEDED.md B4): the pipeline refuses a profile without InputScript,
+// WorkingPathPrefix and OutputPathPrefix, and the wizard that used to fill them
+// is a GUI step. It is the same call the API's write_vpy makes, so the two
+// front ends assemble a task identically.
+//
+// Each task takes the wizard's own per-source profile — a private copy with the
+// three fields filled in — so two tasks of one profile do not share a value.
+// loadTasks built the tasks in profile order and Derive derives in profile
+// order, so the two lists line up position by position.
+func assembleTasks(tasks []loadedTask, reducePath bool) ([]loadedTask, error) {
+	// derived is keyed by config path, holding one profile per source in
+	// profile order.
+	derived := make(map[string][]*profile.Profile, len(tasks))
+	for _, lt := range tasks {
+		path := lt.configPath
+		if path == "" {
+			return nil, fail(exitFailure, "任务 %s 没有关联的 profile 路径，无法装配", lt.task.ID)
+		}
+		if _, done := derived[path]; done {
+			continue
+		}
+		prof, ok := lt.task.Profile.(*profile.Profile)
+		if !ok || prof == nil {
+			return nil, fail(exitFailure, "任务 %s 没有可用的配置", lt.task.ID)
+		}
+
+		// Assemble derives and writes: the generated scripts land next to the
+		// working prefixes and ReducePathMap.log is appended to, which is what
+		// the legacy wizard did before it queued the tasks.
+		result, err := wizard.Assemble(prof, wizard.Options{
+			ProjectFile: path,
+			ReducePath:  reducePath,
+		})
+		if err != nil {
+			return nil, wrapExit(exitUsage, err)
+		}
+		if len(result.Tasks) == 0 {
+			return nil, fail(exitUsage, "profile %s 里没有指定输入文件", path)
+		}
+		perSource := make([]*profile.Profile, 0, len(result.Tasks))
+		for i := range result.Tasks {
+			perSource = append(perSource, result.Tasks[i].Profile)
+		}
+		derived[path] = perSource
+	}
+
+	next := make(map[string]int, len(derived))
+	for i := range tasks {
+		path := tasks[i].configPath
+		n := next[path]
+		perSource := derived[path]
+		if n >= len(perSource) {
+			return nil, fail(exitFailure, "profile %s 的装配结果比任务数少", path)
+		}
+		tasks[i].task.Profile = perSource[n]
+		next[path] = n + 1
 	}
 	return tasks, nil
 }

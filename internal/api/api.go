@@ -3,9 +3,15 @@
 //
 // The package is deliberately thin: a handler decodes a request, calls the
 // component that already owns the behaviour (engine for the queue and the
-// worker pool, profile for validation, platform for the settings) and encodes
-// the answer. Nothing is reimplemented here, so the CLI reaches the same
-// behaviour without going through HTTP.
+// worker pool, profile for validation, wizard for the task assembly, platform
+// for the settings) and encodes the answer. Nothing is reimplemented here, so
+// the CLI reaches the same behaviour without going through HTTP.
+//
+// The task endpoints mirror the legacy new-task wizard's two steps: POST
+// /api/v1/tasks/prepare derives what a profile's sources would become without
+// writing or queueing anything, and POST /api/v1/tasks creates one task per
+// request, optionally writing the generated .vpy itself (write_vpy). See
+// internal/wizard for the derivation and tasks.go for why the two are split.
 //
 // Three constraints shape the design (CLUSTER.md §4):
 //
@@ -137,10 +143,19 @@ func (s *Server) Mount(mux *http.ServeMux) {
 		http.MethodGet:  s.handleTaskList,
 		http.MethodPost: s.handleTaskAdd,
 	})
+	// prepare is registered before the {id} pattern, which is not required for
+	// correctness — ServeMux prefers the more specific literal — but keeps the
+	// two task-level routes next to each other.
+	mux.Handle(APIPrefix+"/tasks/prepare", methods{
+		http.MethodPost: s.handleTaskPrepare,
+	})
 	mux.Handle(APIPrefix+"/tasks/{id}", methods{
 		http.MethodGet:    s.handleTaskGet,
 		http.MethodPatch:  s.handleTaskPatch,
 		http.MethodDelete: s.handleTaskDelete,
+	})
+	mux.Handle(APIPrefix+"/tasks/{id}/cancel", methods{
+		http.MethodPost: s.handleTaskCancel,
 	})
 	mux.Handle(APIPrefix+"/pool/start", methods{
 		http.MethodPost: s.handlePoolStart,

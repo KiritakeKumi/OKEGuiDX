@@ -2,9 +2,11 @@ package vspipeinfo
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 )
@@ -260,5 +262,67 @@ func TestRunMissingTool(t *testing.T) {
 	p := New(Options{VSPipe: "/definitely/not/here/vspipe", Script: "x.vpy"})
 	if err := p.Run(t.Context(), nil); err == nil {
 		t.Fatal("Run() = nil, want a not-found error")
+	}
+}
+
+// TestMain turns the test binary into a vspipe stand-in for the cancellation
+// test. The pipeline drives real processes, and this package is the first stage
+// of it: a cancel that arrives while vspipe is still running has to kill it.
+func TestMain(m *testing.M) {
+	if os.Getenv(fakeEnvMarker) != "" {
+		runFakeTool()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// fakeEnvMarker identifies a child that must behave as a tool.
+const fakeEnvMarker = "OKEGUIDX_VSPIPEINFO_FAKE"
+
+// runFakeTool is the child body: it prints the properties a real vspipe would
+// and then hangs, so the test can cancel while the process is alive.
+//
+// The wait is a sleep rather than an empty select: a `select {}` in a program
+// with one goroutine trips the runtime's deadlock detector and exits the child
+// before the test can cancel it.
+func runFakeTool() {
+	os.Stdout.WriteString("Width: 1920\nHeight: 1080\nFrames: 100\nFPS: 24000/1001 (23.976 fps)\n")
+	time.Sleep(time.Hour)
+}
+
+// TestRunKillsTheChildOnCancel pins the mechanism: the processor watches the
+// context and kills vspipe, instead of blocking on its pipes until the script
+// finishes on its own. Without the watcher a cancelled task stays RUNNING
+// forever, which is exactly what a manual cancel of a hanging index build
+// showed.
+func TestRunKillsTheChildOnCancel(t *testing.T) {
+	// The child is the test binary, which needs the marker to act as a tool.
+	t.Setenv(fakeEnvMarker, "1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	p := New(Options{VSPipe: self, Script: "x.vpy"})
+	done := make(chan error, 1)
+	go func() { done <- p.Run(ctx, nil) }()
+
+	// Give the child time to start and print its properties, then cancel.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Run() = nil, want a cancellation error")
+		}
+		if okerr.AsError(err).Kind != okerr.KindCanceled {
+			t.Errorf("Run() error = %v, want a cancellation error", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run() did not return after the context was cancelled: the child was not killed")
 	}
 }

@@ -43,6 +43,11 @@ func (s *Server) handlePoolStart(w http.ResponseWriter, r *http.Request) {
 // therefore part of the endpoint, not a nicety: a client must get an answer
 // even when a task refuses to die.
 //
+// Waiting tasks are cancelled too (WorkerManager.CancelAll): a client that
+// pressed stop expects the whole run to be over, and the legacy UI did the same
+// from the outside by disabling every task that had not started. An individual
+// task is cancelled with POST /tasks/{id}/cancel instead.
+//
 //   - 200: the pool is quiescent, every running task reached its terminal
 //     state ("已终止" for the ones the stop cancelled).
 //   - 202: the deadline passed first. The stop is still in progress; the
@@ -62,7 +67,7 @@ func (s *Server) handlePoolStop(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	stopped := true
-	if err := s.pool.StopContext(ctx); err != nil {
+	if err := s.pool.CancelAll(ctx); err != nil {
 		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 			writeError(w, errorStatus(err), err)
 			return

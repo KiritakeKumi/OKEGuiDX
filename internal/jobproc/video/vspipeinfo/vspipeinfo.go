@@ -114,6 +114,19 @@ func (p *Processor) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 	}
 	_ = process.Stdin().Close()
 
+	// Cancellation has to kill the child: Consume/Wait block on its pipes, and
+	// a script that hangs (a slow index build, a stalled network source) would
+	// otherwise ignore the cancelled context until it finishes on its own.
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = process.Kill()
+		case <-stopWatch:
+		}
+	}()
+
 	// Both streams carry properties: vspipe writes the script's output to
 	// stdout and its own diagnostics to stderr, and either may hold the
 	// traceback when the script fails.
@@ -121,11 +134,14 @@ func (p *Processor) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 	consumeErr := process.Consume(handler, handler)
 	waitErr := process.Wait()
 
-	if consumeErr != nil {
-		return consumeErr
-	}
+	// The context check comes first: a kill from the watcher above also breaks
+	// the pipe reads, and reporting that as a vspipe failure would hide the
+	// real reason.
 	if ctx.Err() != nil {
 		return okerr.Wrap(ctx.Err(), okerr.KindCanceled, "任务已取消", "vspipe 已被终止")
+	}
+	if consumeErr != nil {
+		return consumeErr
 	}
 	if waitErr != nil {
 		e := okerr.AsError(waitErr)
