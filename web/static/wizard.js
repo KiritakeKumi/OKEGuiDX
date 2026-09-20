@@ -30,11 +30,6 @@ const state = {
   inputs: [],
   selected: new Set(),
   results: [],
-  // stamp is the "MMddHHmm" suffix of every generated script name. It is taken
-  // once per loaded profile rather than per derivation, because the operator has
-  // to save the script at exactly the path the wizard shows: a stamp that moved
-  // between the preview and the submission would make that impossible.
-  stamp: "",
 };
 
 // ---------------------------------------------------------------------------
@@ -143,16 +138,11 @@ async function loadProfileFile(file) {
   state.profileName = file.name;
   state.profileText = await file.text();
   $("profile-text").value = state.profileText;
-  newBatch();
   parseLoadedProfile();
 }
 
 // parseLoadedProfile parses and validates state.profileText. It returns whether
 // the wizard may advance.
-//
-// The stamp is only refreshed when the profile itself changes, so re-validating
-// (a change to the base directory or the template) does not move the script
-// paths under the operator's feet.
 function parseLoadedProfile() {
   clearError();
   state.profile = null;
@@ -220,14 +210,6 @@ function parseLoadedProfile() {
   renderPreview();
   renderInputs();
   return true;
-}
-
-// newBatch starts a new set of generated script names. The legacy loop stamped
-// every file with the time it ran; here the stamp is fixed when a profile is
-// loaded and only reset when the profile changes, because the operator has to
-// save the scripts at exactly the paths the wizard shows.
-function newBatch() {
-  state.stamp = Core.timestamp();
 }
 
 // toValidationError keeps an unexpected exception displayable.
@@ -349,26 +331,25 @@ function reducePathEnabled() {
   return $("opt-reduce-path").checked;
 }
 
-// derivedFor returns the three paths the pipeline needs plus the generated
-// script for one source. It applies the same tag rewriting WizardFinish did.
+// derivedFor returns the per-source paths the page previews. It applies the
+// same tag rewriting and path derivation WizardFinish did, so the table shows
+// the operator what the server is about to produce.
+//
+// The values here are a preview only. POST /tasks re-derives them with
+// internal/wizard (write_vpy) and its answer is the one the task stores, so
+// nothing from this function is sent back to the server.
 function derivedFor(inputFile) {
-  const script = Core.generateVpy(
-    Core.applyDebugTag(Core.applyProjectDirTag($("vpy-text").value, state.baseDir)),
-    inputFile
-  );
   const paths = Core.derivePaths(inputFile, state.baseDir, reducePathEnabled());
   return {
     input: inputFile,
-    script,
     working: paths.working,
     output: paths.output,
-    reduceMap: paths.reduceMap,
-    scriptPath: paths.working + "-" + (state.stamp || Core.timestamp()) + ".vpy",
   };
 }
 
 // renderPaths draws the per-source table of derived paths. It is a preview: the
-// server derives nothing, it stores what this page sends.
+// server derives the values it stores, and these are shown only so the operator
+// can see where the work will land before committing to it.
 function renderPaths() {
   const tbody = $("path-rows");
   tbody.replaceChildren();
@@ -395,29 +376,8 @@ function renderPaths() {
       td.textContent = text;
       tr.appendChild(td);
     }
-    const actions = document.createElement("td");
-    const download = document.createElement("button");
-    download.type = "button";
-    download.className = "link";
-    download.textContent = "下载 .vpy";
-    download.addEventListener("click", () => downloadScript(derived));
-    actions.appendChild(download);
-    tr.appendChild(actions);
     tbody.appendChild(tr);
   }
-}
-
-// downloadScript hands the generated script to the browser. A page cannot write
-// to an absolute path, so this is how the operator gets the file the pipeline
-// expects to find at `input_script`.
-function downloadScript(derived) {
-  const blob = new Blob([derived.script], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = Core.baseName(derived.scriptPath);
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // episodeConfig builds the EpisodeConfig for every task this wizard creates. The
@@ -479,19 +439,26 @@ function profileTextWithConfig(cfg) {
 // commas every real profile contains working. base_dir stands in for the
 // profile's own directory, which the browser cannot know.
 //
-// input_script, working_path_prefix and output_path_prefix are derived here
-// because the pipeline refuses to run without them and the HTTP layer
-// deliberately does not derive them (see addTaskRequest in internal/api/tasks.go).
+// write_vpy is what makes this request work at all. The three fields the
+// pipeline needs (input_script, working_path_prefix, output_path_prefix) are
+// profile fields, not request fields, and the HTTP layer does not derive them
+// for a plain task: it refuses a profile that is missing them. The legacy
+// wizard filled them in as its finishing step, and write_vpy makes the server
+// do exactly that - it runs wizard.Assemble, writes the per-source .vpy next to
+// the source, and sets the three fields from that result.
+//
+// They are deliberately not sent from here. A value in the request wins over
+// the derivation, so sending the page's own idea of the paths would override
+// the server's and could name a .vpy that was never written. The page's table
+// is a preview drawn with the same algorithm; the server's answer is the one
+// that counts.
 function buildTaskBody(inputFile, cfg) {
-  const derived = derivedFor(inputFile);
   return {
     profile_text: profileTextWithConfig(cfg),
     base_dir: state.baseDir,
     inputs: [inputFile],
     name: taskName(inputFile),
-    input_script: derived.scriptPath,
-    working_path_prefix: derived.working,
-    output_path_prefix: derived.output,
+    write_vpy: true,
   };
 }
 
@@ -649,7 +616,6 @@ function wire() {
   $("profile-text").addEventListener("input", (e) => {
     state.profileText = e.target.value;
     state.profileName = "";
-    newBatch();
     parseLoadedProfile();
   });
 
