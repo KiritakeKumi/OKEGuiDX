@@ -274,6 +274,9 @@ native/tchapter/out.txt
 # Sanitizer output and other transient debugging artifacts.
 asan_out.txt
 
+# Browser-automation scratch space; never part of the build.
+.playwright-cli/
+
 # Built CLI binaries on Windows.
 /okegui.exe
 /okeguidx.exe

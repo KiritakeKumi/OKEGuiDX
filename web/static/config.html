@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设置 · OKEGuiDX</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/config.css" />
+  </head>
+  <body>
+    <header>
+      <h1>设置</h1>
+      <p class="banner">
+        对应 C# 的 <code>ConfigPanel</code>：编辑
+        <code>OKEGuiConfig.json</code>（vspipePath / logLevel / singleNuma /
+        rpCheckerPath / avx512 / reducePath），并只读显示 daemon 发现的工具链。
+      </p>
+      <p><a href="/">← 返回任务列表</a></p>
+      <noscript>
+        <p class="banner error">这一页需要 JavaScript 才能读取与保存设置。</p>
+      </noscript>
+    </header>
+
+    <!-- The form itself is rendered by /static/config.js into this container,
+         so the standalone page and a router show the same markup. -->
+    <main id="config-root"></main>
+
+    <script src="/static/config.js"></script>
+  </body>
+</html>

@@ -78,3 +78,10 @@ Makefile text eol=lf
 *.go    text eol=lf
 *.c     text eol=lf
 *.h     text eol=lf
+
+# Web assets: same reason as the shell scripts. These are served verbatim by
+# //go:embed, so the working-tree line endings should match what ships.
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf

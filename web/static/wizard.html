@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>新建任务向导 · OKEGuiDX</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/wizard.css" />
+  </head>
+  <body>
+    <header>
+      <h1>新建任务向导</h1>
+      <p class="banner">
+        对应 C# 的 <code>WizardWindow</code>：读取一份 profile json，预览项目设置，
+        选择输入文件，然后<b>为每个输入文件新建一个任务</b>。
+        每个任务都会带上向导推导出的 <code>input_script</code> /
+        <code>working_path_prefix</code> / <code>output_path_prefix</code>。
+      </p>
+      <p><a href="/">← 返回任务列表</a></p>
+    </header>
+
+    <main>
+      <!-- The error banner is shared by all three steps; the legacy wizard
+           raised a MessageBox per failure, this is the same summary/detail and
+           additionally highlights the offending field. -->
+      <div id="wizard-error" class="error-box" role="alert" hidden></div>
+
+      <section class="panel" id="step-profile">
+        <h2>1. 选择项目文件</h2>
+
+        <div class="row">
+          <label for="profile-file">项目文件</label>
+          <input id="profile-file" type="file" accept=".json,.yaml,.yml,application/json" />
+        </div>
+
+        <div class="row" id="profile-block" data-field="Version">
+          <label for="profile-text">或者粘贴 profile 内容</label>
+          <textarea id="profile-text" spellcheck="false" rows="10"
+            placeholder='{ "Version": 3, "ProjectName": "ep01", ... }'></textarea>
+        </div>
+
+        <div id="drop-zone" class="drop-zone">
+          把 profile json 拖到这里也可以。
+        </div>
+
+        <div class="row">
+          <label for="base-dir">profile 所在目录（base_dir）</label>
+          <input id="base-dir" type="text" data-field="ConfigFilePath"
+            placeholder="D:\WORKS\project\ep01" />
+        </div>
+        <p class="muted">
+          浏览器拿不到文件的真实路径，而 profile 里的相对路径、生成的 vpy 与输出目录都要
+          以它为基准，所以需要手工填一次。留空时按当前工作目录解析（与
+          <code>POST /api/v1/tasks</code> 的 <code>base_dir</code> 语义一致）。
+        </p>
+
+        <div class="row">
+          <label for="vpy-text">vpy 模板（profile 里 InputScript 指向的脚本内容）</label>
+          <textarea id="vpy-text" spellcheck="false" rows="8" data-field="InputScript"
+            placeholder='#OKE:INPUTFILE arg=r""'></textarea>
+        </div>
+        <p class="muted">
+          向导会为每个输入文件生成一份脚本：把 <code>#OKE:INPUTFILE</code> 的取值换成
+          该输入文件，把 <code>#OKE:DEBUG</code> 置为 <code>None</code>，把
+          <code>#OKE:PROJECTDIR</code> 换成上面的目录。所以这里要填脚本的<b>内容</b>，
+          不是路径 —— 浏览器读不到同级文件。
+        </p>
+
+        <h3>项目设置预览（只读）</h3>
+        <dl id="preview" class="preview"></dl>
+
+        <div class="actions">
+          <button id="wizard-next" type="button">下一步</button>
+        </div>
+      </section>
+
+      <section class="panel" id="step-inputs" hidden>
+        <h2>2. 选择输入文件</h2>
+        <p class="muted">
+          列表来自 profile 的 <code>InputFiles</code>。选中的每一个文件都会新建一个任务，
+          各自生成自己的 vpy 与输出路径。
+        </p>
+
+        <div class="actions">
+          <button id="select-all" type="button">全选</button>
+          <button id="select-none" type="button">全不选</button>
+        </div>
+
+        <div id="input-list" class="input-list"></div>
+
+        <div class="actions">
+          <button id="wizard-back" type="button">上一步</button>
+          <button id="wizard-next2" type="button">下一步</button>
+        </div>
+      </section>
+
+      <section class="panel" id="step-confirm" hidden>
+        <h2>3. 每个源文件的独立配置</h2>
+        <p class="muted">
+          对应 <code>EpisodeConfig</code>。C# 的向导会读与源文件同名的小 json
+          （<code>&lt;输入文件&gt;.json</code>），浏览器读不到同级文件，所以在这里填。
+          留空则每个任务的 <code>Config</code> 为空。
+        </p>
+
+        <div class="row">
+          <label for="ep-vspipe-args">VspipeArgs（每行一个参数）</label>
+          <textarea id="ep-vspipe-args" spellcheck="false" rows="3"></textarea>
+        </div>
+
+        <div class="row">
+          <label class="inline">
+            <input id="ep-reencode" type="checkbox" />
+            EnableReEncode（重压：只对旧版成品做切片重压）
+          </label>
+        </div>
+
+        <div id="reencode-fields" hidden>
+          <div class="row" data-field="ReEncodeOldFile">
+            <label for="ep-oldfile">ReEncodeOldFile（旧版压制成品）</label>
+            <input id="ep-oldfile" type="text" />
+          </div>
+          <div class="row" data-field="ReExtractSource">
+            <label class="inline">
+              <input id="ep-reextract" type="checkbox" />
+              ReExtractSource（从旧版成品重新抽流，否则要求成品是 mkv）
+            </label>
+          </div>
+          <div class="row" data-field="ReEncodeSliceArray">
+            <label for="ep-slices">ReEncodeSliceArray（<code>{begin, end}</code>，end = -1 表示到片尾）</label>
+            <textarea id="ep-slices" spellcheck="false" rows="4"
+              placeholder='[ { "Begin": 100, "End": 200 }, { "Begin": 200, "End": -1 } ]'></textarea>
+          </div>
+          <p class="muted">
+            也接受每行 <code>begin end</code> 的简写。切片会先排序再合并，区间重叠会被拒绝。
+          </p>
+        </div>
+
+        <div class="row">
+          <label class="inline">
+            <input id="opt-reduce-path" type="checkbox" checked />
+            缩短过长的输入路径（reducePath，与 <code>GET /api/v1/config</code> 同步）
+          </label>
+        </div>
+
+        <h3>推导出的路径</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>输入文件</th>
+              <th>working_path_prefix</th>
+              <th>output_path_prefix</th>
+              <th>脚本</th>
+            </tr>
+          </thead>
+          <tbody id="path-rows"></tbody>
+        </table>
+        <p id="paths-empty" class="muted">还没有选中输入文件。</p>
+
+        <p class="muted">
+          页面无法创建目录，也无法把生成的 vpy 写到绝对路径上，所以这两步要手工完成：
+          点“下载 .vpy”拿到脚本，把它放到 <code>working_path_prefix</code> 指向的位置，
+          并确保它上一级的目录存在（C# 的向导会自动建目录，HTTP 接口不会）。
+        </p>
+
+        <div class="actions">
+          <button id="wizard-back2" type="button">上一步</button>
+          <button id="wizard-finish" type="button" disabled>完成</button>
+        </div>
+
+        <p id="wizard-count" class="muted"></p>
+        <p id="wizard-status"></p>
+        <div id="wizard-results"></div>
+      </section>
+    </main>
+
+    <script src="/static/wizard-core.js"></script>
+    <script src="/static/wizard.js"></script>
+  </body>
+</html>

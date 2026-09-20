@@ -3,53 +3,41 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OKEGuiDX</title>
+    <title>OKEGuiDX 任务列表</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/tasks.css" />
   </head>
   <body>
-    <header>
-      <h1>OKEGuiDX</h1>
-      <p class="banner">
-        接线阶段的最小页面：读取 <code>/api/v1/status</code> 与
-        <code>/api/v1/tasks</code>，并订阅 <code>/api/v1/events</code>。
-        正式界面（任务列表 / 新建向导 / 设置面板）由 F 批实现，本页会被替换。
-      </p>
+    <header class="app-header">
+      <div class="app-title">
+        <h1>OKEGuiDX</h1>
+        <span id="stream-state" class="pill" data-state="closed">事件流未连接</span>
+      </div>
+      <p id="node-status" class="muted">正在读取节点状态…</p>
+      <nav class="tabs">
+        <a href="/" data-route="tasks">任务列表</a>
+        <a href="/wizard.html" data-route="wizard">新建任务</a>
+        <a href="/static/config.html" data-route="config">设置</a>
+      </nav>
     </header>
 
-    <main>
-      <section class="panel">
-        <h2>节点与工作单元</h2>
-        <div id="status" class="muted">正在读取…</div>
-        <div class="actions">
-          <button id="refresh" type="button">刷新</button>
-          <button id="pool-start" type="button">启动工作单元</button>
-          <button id="pool-stop" type="button">停止工作单元</button>
-        </div>
-      </section>
+    <main id="page" class="page"></main>
 
-      <section class="panel">
-        <h2>任务</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>输入</th>
-              <th>状态</th>
-              <th>阶段</th>
-              <th>进度</th>
-            </tr>
-          </thead>
-          <tbody id="task-rows"></tbody>
-        </table>
-        <p id="tasks-empty" class="muted">队列为空。</p>
-      </section>
+    <footer class="app-footer muted">
+      接口前缀 <code>/api/v1</code>，进度流 <code>/api/v1/events</code>。
+      任务列表用 <code>/api/v1/tasks</code> 拉全量，再用事件流打增量。
+    </footer>
 
-      <section class="panel">
-        <h2>事件流</h2>
-        <div id="events" class="events"></div>
-      </section>
-    </main>
+    <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js"></script>
+    <div id="modal" class="modal" hidden>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <h2 id="modal-title"></h2>
+        <div id="modal-body" class="modal-body"></div>
+        <div id="modal-actions" class="modal-actions"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/static/app.js"></script>
   </body>
 </html>
