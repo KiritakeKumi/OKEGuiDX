@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/textfile"
@@ -114,14 +115,28 @@ func parseEpisodeConfigRaw(raw []byte) (*EpisodeConfig, error) {
 }
 
 // ValidateEpisodeConfig applies the re-encode checks from
-// AddEpProfileService.ProcessJsonProfile. resolveOldFile maps the profile's
-// relative ReEncodeOldFile to an absolute path.
+// AddEpProfileService.ProcessJsonProfile, in the legacy order. The two checks
+// that need the file system (does ReEncodeOldFile exist, and resolving it to an
+// absolute path) belong to the layer that knows the profile's directory; the
+// checks here are all expressible on the config alone.
 func ValidateEpisodeConfig(cfg *EpisodeConfig) error {
 	if !cfg.EnableReEncode {
 		return nil
 	}
 	if cfg.ReEncodeOldFile == "" {
 		return invalid("ReEncodeOldFile", "参数不完整", "ReEncode模式下必须指定旧版成品文件。")
+	}
+	// `if (!json.ReExtractSource && oldFileExtension != ".mkv")`: the old
+	// deliverable is where the non-video tracks come from, and only an mkv can
+	// supply them. ReExtractSource says to take those tracks from the original
+	// source instead, which is why the check does not apply then.
+	//
+	// This must stay on the server. The wizard checks it too, but a request
+	// that skips the page would otherwise reach the muxer with a file it
+	// cannot read tracks from.
+	if !cfg.ReExtractSource && strings.ToLower(filepath.Ext(cfg.ReEncodeOldFile)) != ".mkv" {
+		return invalid("ReEncodeOldFile", "旧版压制成品格式不支持",
+			"需要从旧版压制成品获取非视频轨道，但旧版压制成品不为mkv格式")
 	}
 	if len(cfg.ReEncodeSliceArray) == 0 {
 		return invalid("ReEncodeSliceArray", "参数不完整", "ReEncode模式下必须指定切片数组。")

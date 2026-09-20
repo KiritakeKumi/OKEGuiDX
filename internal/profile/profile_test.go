@@ -477,6 +477,46 @@ func TestEpisodeConfigRejectsOverlappingSlices(t *testing.T) {
 	}
 }
 
+// TestEpisodeConfigRejectsANonMkvOldFile pins the check
+// AddEpProfileService.ProcessJsonProfile made before it accepted a re-encode
+// config: when the non-video tracks are to come from the old deliverable, that
+// deliverable has to be an mkv. The wizard checks it too, but a request that
+// does not go through the page must still be refused here.
+func TestEpisodeConfigRejectsANonMkvOldFile(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		oldFile string
+		extract bool
+		wantErr bool
+	}{
+		{"mkv is accepted", "old.mkv", false, false},
+		{"upper-case mkv is accepted", "old.MKV", false, false},
+		{"a longer extension is not mkv", "old.mkvx", false, true},
+		{"mp4 is refused", "old.mp4", false, true},
+		{"no extension is refused", "old", false, true},
+		{"ReExtractSource lifts the requirement", "old.mp4", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &EpisodeConfig{
+				EnableReEncode:     true,
+				ReEncodeOldFile:    tc.oldFile,
+				ReExtractSource:    tc.extract,
+				ReEncodeSliceArray: []model.SliceInfo{{Begin: 0, End: 100}},
+			}
+			err := ValidateEpisodeConfig(cfg)
+			if tc.wantErr && err == nil {
+				t.Fatalf("ValidateEpisodeConfig(%q) = nil, want a format error", tc.oldFile)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateEpisodeConfig(%q) error = %v", tc.oldFile, err)
+			}
+		})
+	}
+}
+
 func TestEpisodeConfigRejectsIllegalSlice(t *testing.T) {
 	t.Parallel()
 	cfg := &EpisodeConfig{
