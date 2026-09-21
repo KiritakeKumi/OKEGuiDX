@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/api"
@@ -19,6 +20,7 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/proc"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/toolchain"
+	"github.com/KiritakeKumi/OKEGuiDX/internal/wizard"
 	"github.com/KiritakeKumi/OKEGuiDX/web"
 )
 
@@ -112,7 +114,23 @@ func pipelineOptions(s *settings, tm *engine.TaskManager) engine.PipelineOptions
 				return nil, nil, okerr.New(okerr.KindNotFound, "找不到任务",
 					"任务 %s 不在队列中，无法读取它的配置。", t.ID)
 			}
-			return engine.LoadProfileFromDisk(path)
+			p, cfg, err := engine.LoadProfileFromDisk(path)
+			if err != nil {
+				return nil, nil, err
+			}
+			// A task recovered from queue.json still carries its resolved
+			// source, which is all the per-source `<input>.json` lookup needs:
+			// the episode config was never part of the profile file, so it has
+			// to be re-attached from the task rather than from the path. A task
+			// with no sibling config comes back unchanged.
+			if p != nil && len(t.Inputs) > 0 {
+				input := t.Inputs[0].Resolve(s.caps.Volumes)
+				if err := wizard.AttachEpisodeConfig(p, input, filepath.Dir(path)); err != nil {
+					return nil, nil, err
+				}
+				cfg = p.Config
+			}
+			return p, cfg, nil
 		},
 		UpdateTask: tm.Update,
 		Numa:       platform.NewNumaWithCount(s.caps.NUMANodes),

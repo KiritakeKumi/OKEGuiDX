@@ -37,9 +37,13 @@ func missingProfile(t *model.Task) (*profile.Profile, *profile.EpisodeConfig, er
 //
 // It is the body a caller's PipelineOptions.LoadProfile usually wants: the queue
 // owns the path (TaskManager.ConfigPath), so the caller closes over its queue and
-// delegates the reading here. A profile that names its episode config inline uses
-// it; otherwise there is none, because the standalone `<input>.json` path the
-// wizard resolved is not recoverable from a queued task.
+// delegates the reading here.
+//
+// Only the profile's own inline Config is returned. The standalone
+// `<input>.json` the wizard looked for is not part of the profile file, so
+// recovering it needs the task's source path as well; a caller that has the task
+// calls wizard.AttachEpisodeConfig afterwards. It is safe to do so
+// unconditionally: a profile with no sibling config comes back unchanged.
 func LoadProfileFromDisk(configPath string) (*profile.Profile, *profile.EpisodeConfig, error) {
 	if configPath == "" {
 		return nil, nil, okerr.New(okerr.KindConfig, "找不到配置文件", "任务没有关联的 json 文件")

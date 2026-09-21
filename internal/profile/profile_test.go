@@ -188,12 +188,119 @@ func TestParseReEncodeConfig(t *testing.T) {
 	// Three raw slices, two after validation: [40,2400] and [2400,2900] are
 	// contiguous and merge into [40,2900]. This mirrors what the legacy
 	// SliceInfoArray.CheckAndMerge produced.
+	//
+	// parseEpisodeConfigRaw only decodes, because the file-system half of the
+	// legacy check needs the config's own directory; the example's
+	// ReEncodeOldFile is relative and deliberately absent, so this test stays on
+	// the decode-plus-validate pair rather than going through
+	// LoadEpisodeConfig. The merging is a side effect of validation, so it is
+	// asked for explicitly.
+	if err := ValidateEpisodeConfig(cfg); err != nil {
+		t.Fatalf("ValidateEpisodeConfig() error = %v", err)
+	}
 	if len(cfg.ReEncodeSliceArray) != 2 {
 		t.Fatalf("len(ReEncodeSliceArray) = %d, want 2 after merging: %v",
 			len(cfg.ReEncodeSliceArray), cfg.ReEncodeSliceArray)
 	}
 	if len(cfg.VspipeArgs) != 2 {
 		t.Errorf("len(VspipeArgs) = %d, want 2", len(cfg.VspipeArgs))
+	}
+}
+
+// TestLoadEpisodeConfigResolvesTheOldFileAgainstItsOwnDirectory pins the half
+// of AddEpProfileService.ProcessJsonProfile that needs a file system:
+//
+//	FileInfo oldFile = new FileInfo(PathUtils.GetFullPath(json.ReEncodeOldFile,
+//	                                                   Path.GetDirectoryName(filePath)));
+//	json.ReEncodeOldFile = oldFile.FullName;
+//
+// The path is relative and points into a sibling directory, which is the shape
+// the shipped 00001.m2ts.json uses ("output\BDMV\STREAM\..."). Nothing else
+// resolves config-relative paths, so without this the muxer would open them
+// against the process working directory (the same class of bug as B2b).
+func TestLoadEpisodeConfigResolvesTheOldFileAgainstItsOwnDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "output"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	old := filepath.Join(dir, "output", "old.mkv")
+	if err := os.WriteFile(old, nil, 0o600); err != nil {
+		t.Fatalf("write the old deliverable: %v", err)
+	}
+	cfgPath := filepath.Join(dir, "ep01.mkv.json")
+	body := `{"EnableReEncode":true,"ReEncodeOldFile":"output/old.mkv",` +
+		`"ReEncodeSliceArray":[{"begin":0,"end":10}]}`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the config: %v", err)
+	}
+
+	cfg, err := LoadEpisodeConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadEpisodeConfig() error = %v", err)
+	}
+	if cfg.ReEncodeOldFile != old {
+		t.Errorf("ReEncodeOldFile = %q, want %q", cfg.ReEncodeOldFile, old)
+	}
+}
+
+// TestLoadEpisodeConfigChecksExistenceBeforeTheFormat pins the legacy order. The
+// two checks are adjacent in AddEpProfileService and a missing file was reported
+// first, so an absent .mp4 must not be reported as the wrong container format.
+func TestLoadEpisodeConfigChecksExistenceBeforeTheFormat(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ep01.mkv.json")
+	body := `{"EnableReEncode":true,"ReEncodeOldFile":"gone.mp4",` +
+		`"ReEncodeSliceArray":[{"begin":0,"end":10}]}`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the config: %v", err)
+	}
+
+	_, err := LoadEpisodeConfig(cfgPath)
+	if err == nil {
+		t.Fatal("LoadEpisodeConfig() = nil, want the missing-file error")
+	}
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("error = %v, want a *ValidationError", err)
+	}
+	if ve.Summary != "旧版压制成品文件不存在" {
+		t.Errorf("Summary = %q, want the missing-file one", ve.Summary)
+	}
+	if ve.Field != "ReEncodeOldFile" {
+		t.Errorf("Field = %q, want ReEncodeOldFile", ve.Field)
+	}
+}
+
+// TestLoadEpisodeConfigIgnoresTheOldFileWithoutAReEncode pins that the check is
+// inside the EnableReEncode branch, as it was in the legacy code: a config that
+// does not ask for a re-encode has no old deliverable to find.
+func TestLoadEpisodeConfigIgnoresTheOldFileWithoutAReEncode(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ep01.mkv.json")
+	body := `{"EnableReEncode":false,"ReEncodeOldFile":"gone.mkv","ReEncodeSliceArray":[]}`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the config: %v", err)
+	}
+	if _, err := LoadEpisodeConfig(cfgPath); err != nil {
+		t.Errorf("LoadEpisodeConfig() error = %v, want nil", err)
+	}
+}
+
+// TestToModelCarriesIsReEncode pins that the task reports what the profile says.
+// The engine also derives the flag from the config, so a run is correct either
+// way, but the task list and the API answer read this field - and a re-encode
+// that reported itself as a normal task is what made D9 invisible for as long as
+// it was.
+func TestToModelCarriesIsReEncode(t *testing.T) {
+	t.Parallel()
+	for _, want := range []bool{false, true} {
+		p := &Profile{ProjectName: "ep", IsReEncode: want}
+		if got := ToModel(p, nil).IsReEncode; got != want {
+			t.Errorf("ToModel(IsReEncode=%v).IsReEncode = %v", want, got)
+		}
 	}
 }
 

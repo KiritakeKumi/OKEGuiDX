@@ -9,9 +9,9 @@
 // handed the task to the queue. This package is that step, so a headless front
 // end can replace the wizard end to end.
 //
-// The package owns the path arithmetic and the script text. It does not
-// validate the profile, clean up earlier runs, detect chapters, load the
-// per-episode config or queue anything.
+// The package owns the path arithmetic, the script text and the per-source
+// episode config (AttachEpisodeConfig). It does not validate the task profile,
+// clean up earlier runs, detect chapters or queue anything.
 //
 // # Caller's remaining steps
 //
@@ -21,10 +21,10 @@
 //  1. profile.Validate, which needs the VapourSynth installation, the toolchain
 //     and the source files. The wizard ran the equivalent check before it
 //     showed the finish button (AddTaskService.LoadJsonAsProfile).
-//  2. EpisodeConfigPath plus profile.LoadEpisodeConfig for the per-source
-//     config, if there is one. The wizard loaded `<input>.json|.yaml|.yml`,
-//     set the profile's Config and IsReEncode from it, and refused a re-encode
-//     whose container was not MKV.
+//  2. AttachEpisodeConfig, which Derive already calls for you: it finds
+//     `<input>.json|.yaml|.yml` beside the source, sets the profile's Config
+//     and IsReEncode from it, and refuses a re-encode whose container is not
+//     MKV. The legacy wizard did this per source inside the same loop.
 //  3. engine.Cleaner, which removed the leftovers of an earlier run.
 //  4. Chapter detection (chapter.Service.UpdateChapterStatus), which filled the
 //     task's chapter status.
@@ -232,6 +232,12 @@ func Derive(p *profile.Profile, opts Options) (*Result, error) {
 		clone.InputScript = vpyName(working, stamp)
 		clone.WorkingPathPrefix = working
 		clone.OutputPathPrefix = output
+		// The per-source config is part of what the wizard's loop did per
+		// source, so it is attached here and not by the caller: the CLI, the
+		// API's prepare preview and its write_vpy path all get the same answer.
+		if err := AttachEpisodeConfig(&clone, input, projectDir); err != nil {
+			return nil, err
+		}
 
 		res.Tasks = append(res.Tasks, Task{
 			Name:              taskName(p.ProjectName, input),
@@ -292,6 +298,68 @@ func Assemble(p *profile.Profile, opts Options) (*Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// AttachEpisodeConfig gives prof the per-episode configuration for input, and
+// reports a re-encode that cannot be written.
+//
+// This is step 2 of the wizard's finishing loop (WizardWindow.xaml.cs:337-354).
+// The `<input>.json|.yaml|.yml` file beside the source is the older mechanism
+// and it wins: it is what the technical director edits, and a project that
+// predates this program has nothing else. The profile's own inline Config is a
+// later addition - the Web UI writes it - so it is the fallback, used only when
+// no sibling exists. Either way the result is the same structure and gets the
+// same checks, which is why the two branches share the tail.
+//
+// IsReEncode follows EnableReEncode, as the legacy code set it, because the
+// pipeline reads it to decide whether the re-encode stages run, and the task
+// list reads it to say what the task is.
+//
+// input must be the resolved absolute source path, which is what Task carries.
+// dir is the directory the profile's own relative paths are against, used only
+// for an inline Config. A profile with no config at all is returned unchanged,
+// so this is safe to call on every source of every task, and it is: Derive calls
+// it per source, the API calls it for the source it selected, and the daemon
+// calls it again for a task recovered from the queue.
+func AttachEpisodeConfig(prof *profile.Profile, input, dir string) error {
+	if prof == nil || input == "" {
+		return nil
+	}
+	path, ok := EpisodeConfigPath(input)
+	if !ok {
+		if prof.Config == nil {
+			return nil
+		}
+		// No sibling file: the inline Config is all there is. It lives in the
+		// profile, so its relative paths are against the profile's directory
+		// rather than against a file next to the source.
+		if err := profile.ResolveEpisodeConfig(prof.Config, dir); err != nil {
+			return err
+		}
+		prof.IsReEncode = prof.Config.EnableReEncode
+		return checkReEncodeContainer(prof)
+	}
+	cfg, err := profile.LoadEpisodeConfig(path)
+	if err != nil {
+		return err
+	}
+	prof.Config = cfg
+	prof.IsReEncode = cfg.EnableReEncode
+	log.Debug("装载 episode 配置", "input", input, "config", path, "reencode", prof.IsReEncode)
+	return checkReEncodeContainer(prof)
+}
+
+// checkReEncodeContainer mirrors WizardWindow.xaml.cs:344-348: the re-encode
+// merge joins the old mkv's non-video tracks to the new video, so it has nothing
+// to write into when the deliverable is not an mkv. The legacy wizard skipped
+// the source and carried on with the next one; a headless run has no operator to
+// skip for, so it is an error.
+func checkReEncodeContainer(prof *profile.Profile) error {
+	if !prof.IsReEncode || strings.EqualFold(prof.ContainerFormat, "MKV") {
+		return nil
+	}
+	return okerr.New(okerr.KindConfig, "封装格式不支持",
+		"ReEncode项目暂时只支持mkv格式输出，%s格式暂不支持", prof.ContainerFormat)
 }
 
 // PathSuffix mirrors the legacy inputSuffixPath computation: the source path

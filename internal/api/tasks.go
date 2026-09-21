@@ -548,6 +548,15 @@ func (s *Server) buildTask(ctx context.Context, req *addTaskRequest) (*builtTask
 		return nil, err
 	}
 
+	// The per-episode config for the source, whether it sits beside the source
+	// as `<input>.json` or inline in the profile. It is attached here rather
+	// than only inside assembleOne because it is not part of assembly: a caller
+	// that supplies the three path fields itself still gets it, which is what
+	// the legacy wizard did.
+	if err := wizard.AttachEpisodeConfig(prof, input, dir); err != nil {
+		return nil, err
+	}
+
 	// The root of the working tree is resolved before anything else runs, so a
 	// request that asks for assembly without a directory to derive from fails
 	// with that reason instead of a validation error about the script path.

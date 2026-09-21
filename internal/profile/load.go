@@ -2,6 +2,7 @@ package profile
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -81,6 +82,18 @@ func parseDecoded(raw string, profilePath string) (*Profile, error) {
 
 // LoadEpisodeConfig reads the separate per-episode configuration file used by
 // re-encode tasks.
+//
+// ReEncodeOldFile is resolved against this file's own directory and must exist,
+// exactly as AddEpProfileService.ProcessJsonProfile did:
+//
+//	FileInfo oldFile = new FileInfo(PathUtils.GetFullPath(json.ReEncodeOldFile, Path.GetDirectoryName(filePath)));
+//	if (!oldFile.Exists) { reject }
+//	json.ReEncodeOldFile = oldFile.FullName;
+//
+// That is why this function, and not parseEpisodeConfigRaw, owns the check: the
+// directory is the file's, and a byte slice does not carry it. The legacy order
+// is kept, so a missing .mp4 is reported as missing rather than as the wrong
+// container format.
 func LoadEpisodeConfig(path string) (*EpisodeConfig, error) {
 	raw, err := textfile.Read(path)
 	if err != nil {
@@ -94,11 +107,58 @@ func LoadEpisodeConfig(path string) (*EpisodeConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := ResolveEpisodeConfig(cfg, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// ResolveEpisodeConfig applies the two checks AddEpProfileService made on a
+// config it had already read: ReEncodeOldFile is resolved against dir and must
+// exist, and the container and slice rules of ValidateEpisodeConfig must hold.
+//
+// dir is the directory the config's relative paths are against: the episode
+// config file's own directory for a `<input>.json`, and the profile's directory
+// for a Config written inline in the profile. The inline form has no file of its
+// own for LoadEpisodeConfig to take the directory from, which is why this is
+// exported.
+func ResolveEpisodeConfig(cfg *EpisodeConfig, dir string) error {
+	if err := resolveOldFile(cfg, dir); err != nil {
+		return err
+	}
+	return ValidateEpisodeConfig(cfg)
+}
+
+// resolveOldFile makes ReEncodeOldFile absolute against dir and checks that it
+// exists, mirroring AddEpProfileService.ProcessJsonProfile.
+//
+// Only a re-encode has an old deliverable, which is the branch the legacy code
+// entered before it did any of this. A path that is already absolute is left
+// alone (PathUtils.GetFullPath returned those unchanged).
+func resolveOldFile(cfg *EpisodeConfig, dir string) error {
+	if !cfg.EnableReEncode || cfg.ReEncodeOldFile == "" {
+		return nil
+	}
+	path := cfg.ReEncodeOldFile
+	if !filepath.IsAbs(path) && dir != "" {
+		path = filepath.Join(dir, path)
+	}
+	path = filepath.Clean(path)
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		return invalid("ReEncodeOldFile", "旧版压制成品文件不存在",
+			"指定的旧版压制成品不存在，是不是路径写错了？(%s)", path)
+	}
+	cfg.ReEncodeOldFile = path
+	return nil
 }
 
 // parseEpisodeConfigRaw decodes an episode config without touching the
 // filesystem, so callers that already have the bytes (and tests) can use it.
+//
+// It deliberately does not validate. Validation depends on the config's own
+// directory (see resolveOldFile) and would then run before ReEncodeOldFile had
+// been resolved, which is the opposite of the legacy order. LoadEpisodeConfig
+// is the caller that does both.
 func parseEpisodeConfigRaw(raw []byte) (*EpisodeConfig, error) {
 	cfg := &EpisodeConfig{}
 	if err := json.Unmarshal([]byte(stripTrailingCommas(string(raw))), cfg); err != nil {
@@ -108,17 +168,14 @@ func parseEpisodeConfigRaw(raw []byte) (*EpisodeConfig, error) {
 			Field:   "Config",
 		}
 	}
-	if err := ValidateEpisodeConfig(cfg); err != nil {
-		return nil, err
-	}
 	return cfg, nil
 }
 
 // ValidateEpisodeConfig applies the re-encode checks from
-// AddEpProfileService.ProcessJsonProfile, in the legacy order. The two checks
-// that need the file system (does ReEncodeOldFile exist, and resolving it to an
-// absolute path) belong to the layer that knows the profile's directory; the
-// checks here are all expressible on the config alone.
+// AddEpProfileService.ProcessJsonProfile, in the legacy order. The check that
+// needs the file system (does ReEncodeOldFile exist, and resolving it to an
+// absolute path) is resolveOldFile's, because it needs the config's directory;
+// everything here is expressible on the config alone.
 func ValidateEpisodeConfig(cfg *EpisodeConfig) error {
 	if !cfg.EnableReEncode {
 		return nil
@@ -173,6 +230,13 @@ func ToModel(p *Profile, cfg *EpisodeConfig) *model.Task {
 		Name:    p.ProjectName,
 		Profile: p,
 		Config:  cfg,
+		// IsReEncode travels with the profile because it is the profile the
+		// wizard set it on (WizardWindow.xaml.cs:340: `td.Taskfile.IsReEncode =
+		// epConfig.EnableReEncode`). The engine also derives it from the config,
+		// so a run is correct either way, but the task list and the API answer
+		// read this field, and a re-encode that reported itself as a normal task
+		// is what made D9 invisible.
+		IsReEncode: p.IsReEncode,
 		Status: model.TaskStatus{
 			ID:       model.NewTaskID(),
 			Name:     p.ProjectName,

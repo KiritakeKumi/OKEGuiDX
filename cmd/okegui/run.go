@@ -260,7 +260,7 @@ func loadTasks(paths []string, caps node.Capabilities) ([]loadedTask, error) {
 
 		// The queue holds one row per source file, which is what the legacy
 		// wizard produced: one TaskDetail per InputFile, each with its own
-		// generated .vpy and its own output name.
+		// generated .vpy, its own output name and its own episode config.
 		//
 		// Each row needs its own id: profile.ToModel assigned one to the base,
 		// and the queue rejects a second task with an id it already holds, so a
@@ -273,14 +273,28 @@ func loadTasks(paths []string, caps node.Capabilities) ([]loadedTask, error) {
 		dir := filepath.Dir(p.ConfigFilePath)
 		for _, raw := range p.InputFiles {
 			input := resolveFrom(dir, raw)
+
+			// Each source gets its own copy of the profile, because the episode
+			// config is per source: `<input>.json` sits next to the source, so
+			// two sources of one profile can disagree about it. Attaching to the
+			// shared profile would leak one source's config into the next.
+			prof := *p
+			if err := wizard.AttachEpisodeConfig(&prof, input, dir); err != nil {
+				return nil, wrapExit(exitUsage, err)
+			}
+			if prof.Config == nil {
+				// The profile had no sibling config and no inline one, so fall
+				// back to what episodeConfigFor validated, if anything.
+				prof.Config = cfg
+			}
 			task := *base
 			task.ID = model.NewTaskID()
+			task.Profile = &prof
+			task.Config = prof.Config
 			task.Inputs = []model.FileRef{model.NewFileRef(input)}
 			task.Status.Input = task.Inputs[0]
-			task.Status.Output = outputRef(p, input)
-			if cfg != nil && cfg.EnableReEncode {
-				task.IsReEncode = true
-			}
+			task.Status.Output = outputRef(&prof, input)
+			task.IsReEncode = prof.IsReEncode
 			tasks = append(tasks, loadedTask{task: &task, configPath: p.ConfigFilePath})
 		}
 	}
@@ -350,6 +364,14 @@ func assembleTasks(tasks []loadedTask, reducePath bool) ([]loadedTask, error) {
 			return nil, fail(exitFailure, "profile %s 的装配结果比任务数少", path)
 		}
 		tasks[i].task.Profile = perSource[n]
+		// Profile and Config travel together: the config is per source, and the
+		// line above has just replaced the profile that carried it. Leaving the
+		// old value here would make the engine run the task as a re-encode, or
+		// not, according to the wrong source.
+		if cfg := perSource[n].Config; cfg != nil {
+			tasks[i].task.Config = cfg
+			tasks[i].task.IsReEncode = cfg.EnableReEncode
+		}
 		next[path] = n + 1
 	}
 	return tasks, nil
