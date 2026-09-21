@@ -138,21 +138,49 @@ func (r FileRef) MarshalText() ([]byte, error) { return []byte(r.String()), nil 
 
 // UnmarshalText accepts the textual form produced by MarshalText, so a FileRef
 // can be stored either as a structured object or as a single string.
+//
+// Ambiguity: MarshalText writes "volume/rel" with no separator between the
+// volume id and the path, so "mnt/media/ep01.mkv" is equally readable as volume
+// "mnt" plus "/media/ep01.mkv" or as the single local path "mnt/media/ep01.mkv".
+// Guessing a volume from any leading segment invents a volume identity that a
+// bare relative path never had, which is wrong for the cluster design in
+// CLUSTER.md §2 (a path must not claim a volume it does not belong to).
+//
+// Rule: the prefix before the first "/" is a volume id only when it is exactly
+// LocalVolume ("local"). Everything else — a bare relative path, an absolute
+// POSIX path, a drive-qualified path, a UNC path — is fed through NewFileRef as
+// a plain path and lands on the local volume.
+//
+// A Windows drive prefix is deliberately NOT a volume: "D:/a/b" is the local
+// path D:\a\b, not volume "D:", because a drive belongs to each path and not to
+// a volume (see Resolve and normalizeRel). Treating it as a volume would drop
+// the drive, the very regression TestFileRefResolveKeepsDriveLetter guards.
+// The empty prefix ("/mnt/...", from an absolute POSIX path) is a path by the
+// same rule.
+//
+// Consequently the text form cannot name an arbitrary cluster volume such as
+// "nas/..."; that is a deliberate boundary until cluster volumes are
+// implemented, at which point a wire form that distinguishes a volume from a
+// path (for example a structured object, or a reserved volume-id syntax) is
+// needed.
 func (r *FileRef) UnmarshalText(b []byte) error {
 	s := string(b)
-	volume, rel, found := strings.Cut(s, "/")
-	if !found {
-		// A bare path with no volume prefix.
+	prefix, rel, found := strings.Cut(s, "/")
+	if !found || !isVolumePrefix(prefix) {
+		// A plain path with no volume prefix (or not one we recognize).
 		*r = NewFileRef(s)
 		return nil
 	}
-	if volume == "" || strings.Contains(volume, ":") {
-		// Not a "volume/rel" form after all; treat the whole value as a path.
-		*r = NewFileRef(s)
-		return nil
-	}
-	*r = FileRef{Volume: volume, Rel: "/" + strings.TrimPrefix(rel, "/")}
+	*r = FileRef{Volume: prefix, Rel: "/" + strings.TrimPrefix(rel, "/")}
 	return nil
+}
+
+// isVolumePrefix reports whether the segment before the first "/" in a textual
+// FileRef is a volume id rather than the first segment of a path. Only the
+// implicit local volume qualifies; see UnmarshalText for why an arbitrary name
+// (and a drive prefix) must not.
+func isVolumePrefix(prefix string) bool {
+	return prefix == LocalVolume
 }
 
 func normalizeRel(path string) string {

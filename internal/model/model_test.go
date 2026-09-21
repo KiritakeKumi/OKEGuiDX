@@ -167,6 +167,114 @@ func TestFileRefDriveSurvivesQueueRoundTrip(t *testing.T) {
 	}
 }
 
+// TestFileRefUnmarshalTextVolumePrefix pins the rule that a textual FileRef
+// names a volume only when the prefix is the implicit local volume ("local").
+// Every other input is a plain path and lands on the local volume. The table is
+// the seven inputs from the defect report; each expectation is a hardcoded
+// literal (the resolved path goes through filepath.FromSlash, which is not the
+// function under test), so restoring the old "any non-empty prefix is a volume"
+// rule fails this test.
+func TestFileRefUnmarshalTextVolumePrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		in          string
+		wantVolume  string
+		wantRel     string
+		wantResolve string // slash form; converted to the host separator below
+	}{
+		{
+			name: "marshalled local ref with a drive", in: "local/D:/a/b/ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/D:/a/b/ep01.mkv", wantResolve: "D:/a/b/ep01.mkv",
+		},
+		{
+			name: "marshalled local ref with a posix path", in: "local/mnt/media/ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/mnt/media/ep01.mkv", wantResolve: "/mnt/media/ep01.mkv",
+		},
+		{
+			name: "bare relative posix path", in: "mnt/media/ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/mnt/media/ep01.mkv", wantResolve: "/mnt/media/ep01.mkv",
+		},
+		{
+			name: "absolute posix path", in: "/mnt/media/ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/mnt/media/ep01.mkv", wantResolve: "/mnt/media/ep01.mkv",
+		},
+		{
+			name: "drive-qualified path", in: "D:/a/b/ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/D:/a/b/ep01.mkv", wantResolve: "D:/a/b/ep01.mkv",
+		},
+		{
+			name: "unc path", in: `\\server\share\x`,
+			wantVolume: LocalVolume, wantRel: "//server/share/x", wantResolve: "//server/share/x",
+		},
+		{
+			name: "bare file name", in: "ep01.mkv",
+			wantVolume: LocalVolume, wantRel: "/ep01.mkv", wantResolve: "/ep01.mkv",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var ref FileRef
+			if err := ref.UnmarshalText([]byte(tc.in)); err != nil {
+				t.Fatalf("UnmarshalText(%q) error = %v", tc.in, err)
+			}
+			if ref.Volume != tc.wantVolume {
+				t.Errorf("UnmarshalText(%q).Volume = %q, want %q", tc.in, ref.Volume, tc.wantVolume)
+			}
+			if ref.Rel != tc.wantRel {
+				t.Errorf("UnmarshalText(%q).Rel = %q, want %q", tc.in, ref.Rel, tc.wantRel)
+			}
+			want := filepath.FromSlash(tc.wantResolve)
+			if got := ref.ResolveLocal(""); got != want {
+				t.Errorf("UnmarshalText(%q).ResolveLocal(\"\") = %q, want %q", tc.in, got, want)
+			}
+		})
+	}
+}
+
+// TestFileRefTextRoundTrip pins that MarshalText's textual form is accepted back
+// by UnmarshalText for the two local reference shapes. The wire strings are
+// hardcoded literals, not recomputed from the reference under test.
+func TestFileRefTextRoundTrip(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		orig FileRef
+		want string
+	}{
+		{
+			name: "local ref with a drive",
+			orig: NewFileRef(`D:\a\b\ep01.mkv`),
+			want: "local/D:/a/b/ep01.mkv",
+		},
+		{
+			name: "local ref with a posix path",
+			orig: NewFileRef("/mnt/media/ep01.mkv"),
+			want: "local/mnt/media/ep01.mkv",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			text, err := tc.orig.MarshalText()
+			if err != nil {
+				t.Fatalf("MarshalText() error = %v", err)
+			}
+			if string(text) != tc.want {
+				t.Fatalf("MarshalText() = %q, want %q", text, tc.want)
+			}
+			var back FileRef
+			if err := back.UnmarshalText(text); err != nil {
+				t.Fatalf("UnmarshalText(%q) error = %v", text, err)
+			}
+			if back != tc.orig {
+				t.Errorf("text round trip = %+v, want %+v", back, tc.orig)
+			}
+		})
+	}
+}
+
 func TestNewTaskIDIsUniqueAndWellFormed(t *testing.T) {
 	t.Parallel()
 	seen := make(map[TaskID]struct{}, 1000)
