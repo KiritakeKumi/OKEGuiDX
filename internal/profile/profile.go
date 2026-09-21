@@ -164,11 +164,40 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// foldASCII lowercases only the ASCII letters A-Z and leaves every other byte
+// untouched. It is the Go equivalent of .NET's StringComparison.OrdinalIgnoreCase
+// for an ASCII needle: that comparison folds A-Z and treats every non-ASCII code
+// point as itself.
+func foldASCII(s string) string {
+	b := []byte(s)
+	for i := range b {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
 // DeprecatedOptionFound returns the first deprecated option name present in the
 // raw profile text, or "" when the text is clean.
+//
+// The comparison mirrors the legacy AddTaskService.LoadJsonAsProfile exactly:
+//
+//	if (profileStr.IndexOf(option, StringComparison.OrdinalIgnoreCase) >= 0)
+//
+// StringComparison.OrdinalIgnoreCase is NOT a culture-aware ToLower/ToUpper: it
+// folds only the ASCII letters A-Z and leaves every other code point alone.
+// (Probed on this machine's .NET Framework 4.8: no code point in U+0080..U+FFFF
+// makes OrdinalIgnoreCase match "SkipMuxing" in any letter position.) This
+// function used to call strings.ToLower, which folds the KELVIN SIGN U+212A to
+// 'k' - so it rejected a profile containing "S\u212aIPMUXING" that the C#
+// accepted, the wrong direction for a frozen format that must keep old files
+// working. Since the option names are pure ASCII, an ASCII-only fold reproduces
+// the C# for every possible input.
 func DeprecatedOptionFound(raw string) string {
+	folded := foldASCII(raw)
 	for _, opt := range DeprecatedOptions {
-		if strings.Contains(strings.ToLower(raw), strings.ToLower(opt)) {
+		if strings.Contains(folded, foldASCII(opt)) {
 			return opt
 		}
 	}

@@ -69,20 +69,40 @@ function nextNonSpaceCloses(raw, start) {
 // profile.DeprecatedOptions / Constants.deprecatedOptions.
 const DEPRECATED_OPTIONS = ["SkipMuxing", "IncludeSub", "SubtitleLanguage"];
 
+// foldASCII lowercases only the ASCII letters A-Z and leaves every other code
+// point untouched, exactly as .NET's StringComparison.OrdinalIgnoreCase does for
+// an ASCII needle. It is deliberately not String.prototype.toLowerCase: that
+// folds U+212A KELVIN SIGN to "k", which would make the page disagree with the
+// server.
+function foldASCII(text) {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    out += c >= 0x41 && c <= 0x5a ? String.fromCharCode(c + 0x20) : text[i];
+  }
+  return out;
+}
+
 // deprecatedOptionFound returns the first deprecated option present in the raw
 // text, or "".
 //
-// The comparison lowercases the whole text, which is what the Go port does
-// (profile.DeprecatedOptionFound uses strings.ToLower) and what keeps the page
-// and the server in agreement. It is deliberately NOT the C# comparison: the
-// legacy IndexOf used StringComparison.OrdinalIgnoreCase, which does not fold
-// U+212A KELVIN SIGN, while both Go and JavaScript do. See the audit note in
-// the test file; changing this to match the C# exactly would make the page
-// disagree with the server.
+// The comparison reproduces the legacy AddTaskService.LoadJsonAsProfile check
+// and the Go port (profile.DeprecatedOptionFound) character for character:
+//
+//	if (profileStr.IndexOf(option, StringComparison.OrdinalIgnoreCase) >= 0)
+//
+// StringComparison.OrdinalIgnoreCase folds only the ASCII letters A-Z; it does
+// NOT fold U+212A KELVIN SIGN, U+017F LATIN SMALL LETTER LONG S, U+0131
+// DOTLESS I, U+0130 I WITH DOT ABOVE or any other non-ASCII code point. An
+// earlier version lowercased the whole text with toLowerCase, which folded
+// KELVIN to "k" and rejected a profile containing "S\u212aIPMUXING" that the
+// C# accepted - the wrong direction for a frozen format. Because the option
+// names are pure ASCII, foldASCII matches the C# for every input, and the page
+// and the server can never disagree.
 function deprecatedOptionFound(raw) {
-  const lower = String(raw).toLowerCase();
+  const folded = foldASCII(String(raw));
   for (const opt of DEPRECATED_OPTIONS) {
-    if (lower.includes(opt.toLowerCase())) {
+    if (folded.includes(foldASCII(opt))) {
       return opt;
     }
   }
@@ -606,6 +626,7 @@ const OKEWizardCore = {
   nextNonSpaceCloses,
   DEPRECATED_OPTIONS,
   deprecatedOptionFound,
+  foldASCII,
   // errors
   ValidationError,
   errorFromBody,

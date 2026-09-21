@@ -224,6 +224,18 @@ func validateInputFiles(p *Profile, in Inputs) error {
 	if in.InputExists == nil {
 		return nil
 	}
+	// The duplicate check compares the RAW InputFiles entries, not resolved
+	// paths. This layer cannot resolve them: it has no profile directory, which
+	// is exactly why Validate takes an Inputs struct of callbacks and none of
+	// them returns one (InputExists is handed the relative string as written).
+	// Resolved-path deduplication is therefore the caller's job: internal/api's
+	// selectInput resolves each entry against the profile directory first and
+	// rejects duplicates on the resolved path, so ["a.m2ts", "./a.m2ts"] is
+	// refused there even though it passes here. No caller of Validate is
+	// currently in that situation (the API calls selectInput on the same
+	// profile), so this is a latent asymmetry, not a live bug; the frozen
+	// signature is kept and the limitation is pinned by
+	// TestValidateDuplicateCheckComparesRawEntries.
 	seen := make(map[string]struct{}, len(p.InputFiles))
 	for _, f := range p.InputFiles {
 		if _, dup := seen[f]; dup {

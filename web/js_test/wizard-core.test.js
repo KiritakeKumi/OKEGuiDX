@@ -80,16 +80,47 @@ test("deprecatedOptionFound finds the legacy options", () => {
   assert.equal(Core.deprecatedOptionFound('{"ProjectName":"ep01"}'), "");
 });
 
-test("deprecatedOptionFound folds the way the Go port does", () => {
-  // profile.DeprecatedOptionFound lowercases the whole text (strings.ToLower),
-  // and JavaScript's toLowerCase folds the same code points, so the page and the
-  // server agree. The legacy C# used OrdinalIgnoreCase, which does NOT fold
-  // U+212A KELVIN SIGN; that divergence lives in the Go layer and is reported,
-  // not reproduced here. This test pins the Go-matching behaviour so a future
-  // "fix" toward the C# cannot silently desync the page.
-  assert.equal(Core.deprecatedOptionFound('{"S\u212aIPMUXING":true}'), "SkipMuxing");
-  assert.equal(Core.deprecatedOptionFound('{"SK\u212aIPMUXING":true}'), "");
-  assert.equal(Core.deprecatedOptionFound('{"S\u0130kipMuxing":true}'), "");
+test("deprecatedOptionFound folds like the C# OrdinalIgnoreCase", () => {
+  // The legacy AddTaskService.LoadJsonAsProfile check is
+  //   profileStr.IndexOf(option, StringComparison.OrdinalIgnoreCase) >= 0
+  // and StringComparison.OrdinalIgnoreCase folds ONLY the ASCII letters A-Z.
+  // The .NET answers below were produced on this machine (.NET Framework 4.8)
+  // with that exact IndexOf call; profile.DeprecatedOptionFound uses the same
+  // ASCII-only fold, so the page and the server agree on every row.
+  const cases = [
+    { name: "ASCII SkipMuxing", raw: '{"SkipMuxing":true}', want: "SkipMuxing" },
+    { name: "ASCII skipmuxing", raw: '{"skipmuxing":true}', want: "SkipMuxing" },
+    // U+212A KELVIN SIGN: toLowerCase would fold it to "k"; OrdinalIgnoreCase
+    // does not, and the C# accepted this profile. The old toLowerCase mirror
+    // rejected it, which is the D2 defect.
+    { name: "KELVIN for k", raw: '{"S\u212aipMuxing":true}', want: "" },
+    // U+017F LONG S: toUpperCase folds it to "S"; OrdinalIgnoreCase does not.
+    { name: "LONG S for S", raw: '{"\u017FipMuxing":true}', want: "" },
+    // U+0131 DOTLESS I: toUpperCase folds it to "I"; OrdinalIgnoreCase does not.
+    { name: "DOTLESS I for i", raw: '{"Sk\u0131pMuxing":true}', want: "" },
+    // U+0130 I WITH DOT ABOVE: toLowerCase folds it to "i"; OrdinalIgnoreCase
+    // does not.
+    { name: "I WITH DOT for i", raw: '{"Sk\u0130pMuxing":true}', want: "" },
+    { name: "SHARP S", raw: '{"\u00DFkipMuxing":true}', want: "" },
+    { name: "a-umlaut", raw: '{"\u00E4kipMuxing":true}', want: "" },
+    { name: "A-umlaut", raw: '{"\u00C4kipMuxing":true}', want: "" },
+    { name: "Cyrillic a", raw: '{"\u0430kipMuxing":true}', want: "" },
+    { name: "Cyrillic A", raw: '{"\u0410kipMuxing":true}', want: "" },
+  ];
+  for (const tc of cases) {
+    assert.equal(Core.deprecatedOptionFound(tc.raw), tc.want, tc.name);
+  }
+});
+
+test("foldASCII leaves non-ASCII code points alone", () => {
+  // The helper the comparison rests on: only A-Z change. This is what makes
+  // the page agree with .NET and with the Go server.
+  assert.equal(Core.foldASCII("ABCxyz"), "abcxyz");
+  assert.equal(Core.foldASCII("\u212A"), "\u212A");
+  assert.equal(Core.foldASCII("\u017F"), "\u017F");
+  assert.equal(Core.foldASCII("\u0130"), "\u0130");
+  assert.equal(Core.foldASCII("\u00C4"), "\u00C4");
+  assert.equal(Core.foldASCII("S\u212aIPMUXING"), "s\u212aipmuxing");
 });
 
 // ---------------------------------------------------------------------------

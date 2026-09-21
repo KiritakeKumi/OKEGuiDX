@@ -54,14 +54,37 @@ func (m MuxOption) String() string {
 // MarshalText implements encoding.TextMarshaler.
 func (m MuxOption) MarshalText() ([]byte, error) { return []byte(m.String()), nil }
 
-// UnmarshalText implements encoding.TextUnmarshaler.
+// UnmarshalText implements encoding.TextUnmarshaler. Only the string names are
+// accepted; a bare number is rejected (encoding/json reports "JSON value must be
+// string" for a TextUnmarshaler).
+//
+// That is deliberate, and it is not a compatibility defect. The frozen profile
+// format uses the names: the shipped dist/windows/examples/demo_720p.json spells
+// "MuxOption" : "Skip", and the legacy loader is YamlDotNet 11.1.1
+// (AddTaskService.LoadJsonAsProfile ->
+// new DeserializerBuilder().IgnoreUnmatchedProperties().Build()), whose
+// ScalarNodeDeserializer does `Enum.Parse(underlyingType, scalar.Value, true)`.
+// Enum.Parse also accepts the numeric index, so "MuxOption" : 4 would have
+// loaded in C# - but that is a leniency of the library's scalar conversion, not
+// part of the format. Newtonsoft.Json's enum converter has the same numeric
+// leniency, and it is likewise not exercised by the profile path.
+//
+// Crucially, the legacy application never WROTE a profile: the only serializer
+// in the whole legacy tree writes OKEGuiConfig.json (Utils/Initializer.cs
+// WriteConfig) and the rpc result files (JobProcessor/RpChecker/RpChecker.cs);
+// there is no JsonConvert.SerializeObject of TaskProfile anywhere, and MuxOption
+// appears in no XAML, so it is not a wizard-editable field either. A number in
+// MuxOption could therefore only ever be a hand-written input, never something
+// the old GUI emitted - so refusing it cannot break an existing file.
 func (m *MuxOption) UnmarshalText(b []byte) error {
 	*m = ParseMuxOption(string(b))
 	return nil
 }
 
 // ParseMuxOption parses a JSON MuxOption value, ignoring case as the legacy
-// deserializer did.
+// deserializer did. Only the names Default/Mka/External/ExtractOnly/Skip are
+// accepted; see UnmarshalText for why a numeric index is not part of the frozen
+// format.
 func ParseMuxOption(s string) MuxOption {
 	switch lowerASCII(s) {
 	case "mka":

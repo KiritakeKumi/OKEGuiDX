@@ -523,6 +523,30 @@ func TestValidateInputFileChecks(t *testing.T) {
 	})
 }
 
+// TestValidateDuplicateCheckComparesRawEntries documents a known limitation
+// rather than blessing it. validateInputFiles dedupes the raw InputFiles
+// entries, so two spellings of the same file pass here; internal/api's
+// selectInput resolves against the profile directory first and does reject
+// them. This layer cannot resolve (Validate has no profile directory - that is
+// why Inputs is a struct of callbacks, none of which returns one), so the
+// resolved-path check is deliberately left to the caller. If that ever becomes
+// reachable, this test is the signal to move the check.
+func TestValidateDuplicateCheckComparesRawEntries(t *testing.T) {
+	t.Parallel()
+	p := loadExample(t, "demo.json")
+	p.InputFiles = []string{"a.m2ts", "./a.m2ts"}
+	in := baseInputs(p)
+	in.InputExists = func(string) bool { return true }
+	if err := Validate(p, in); err != nil {
+		t.Fatalf("Validate() error = %v; the raw-entry check is expected to accept this", err)
+	}
+	// The identical spelling is still caught, so the check has not been lost.
+	p.InputFiles = []string{"a.m2ts", "a.m2ts"}
+	if err := Validate(p, in); err == nil {
+		t.Fatal("Validate() = nil, want the identical-spelling duplicate to be caught")
+	}
+}
+
 func TestInputTagPatternMatchesRealScript(t *testing.T) {
 	t.Parallel()
 	// The exact tag form used by the shipped demo scripts.
@@ -686,6 +710,7 @@ func TestDeprecatedOptionFoundIsCaseInsensitive(t *testing.T) {
 		`{"SkipMuxing":true}`,
 		`{"skipmuxing":true}`,
 		`{"SKIPMUXING":true}`,
+		`{"sKiPmUxInG":true}`,
 	} {
 		if got := DeprecatedOptionFound(raw); got != "SkipMuxing" {
 			t.Errorf("DeprecatedOptionFound(%q) = %q, want SkipMuxing", raw, got)
@@ -693,6 +718,77 @@ func TestDeprecatedOptionFoundIsCaseInsensitive(t *testing.T) {
 	}
 	if got := DeprecatedOptionFound(`{"Version":3}`); got != "" {
 		t.Errorf("DeprecatedOptionFound() = %q, want empty", got)
+	}
+}
+
+// TestDeprecatedOptionFoundMatchesOrdinalIgnoreCase pins the comparison against
+// the legacy AddTaskService.LoadJsonAsProfile check:
+//
+//	if (profileStr.IndexOf(option, StringComparison.OrdinalIgnoreCase) >= 0)
+//
+// The .NET answer for each row was produced on this machine (.NET Framework
+// 4.8) with the same IndexOf call; the ASCII-only fold below is the Go
+// candidate that has to reproduce it. The characters are the ones that make a
+// culture-aware ToLower/ToUpper (or strings.EqualFold) disagree with
+// OrdinalIgnoreCase.
+func TestDeprecatedOptionFoundMatchesOrdinalIgnoreCase(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want string
+		// dotnet is the result of the C# IndexOf(..., OrdinalIgnoreCase) probe.
+		dotnet bool
+	}{
+		// A plain ASCII match, in both cases.
+		{"ASCII SkipMuxing", `{"SkipMuxing":true}`, "SkipMuxing", true},
+		{"ASCII skipmuxing", `{"skipmuxing":true}`, "SkipMuxing", true},
+		// U+212A KELVIN SIGN looks like a k but OrdinalIgnoreCase does not fold
+		// it; strings.ToLower does (to 'k'), which is the bug this pins.
+		{"KELVIN for k", "{\"S\u212aipMuxing\":true}", "", false},
+		// U+017F LATIN SMALL LETTER LONG S looks like an s; strings.ToUpper
+		// folds it to 'S', OrdinalIgnoreCase does not.
+		{"LONG S for S", "{\"\u017FipMuxing\":true}", "", false},
+		// U+0131 DOTLESS I looks like an i; strings.ToUpper folds it to 'I'.
+		{"DOTLESS I for i", "{\"Sk\u0131pMuxing\":true}", "", false},
+		// U+0130 I WITH DOT ABOVE looks like an I; strings.ToLower folds it to
+		// 'i' (plus a combining dot).
+		{"I WITH DOT for i", "{\"Sk\u0130pMuxing\":true}", "", false},
+		// No folding at all: these are simply different letters.
+		{"SHARP S", "{\"\u00DFkipMuxing\":true}", "", false},
+		{"a-umlaut", "{\"\u00E4kipMuxing\":true}", "", false},
+		{"A-umlaut", "{\"\u00C4kipMuxing\":true}", "", false},
+		{"Cyrillic a", "{\"\u0430kipMuxing\":true}", "", false},
+		{"Cyrillic A", "{\"\u0410kipMuxing\":true}", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := DeprecatedOptionFound(tc.raw)
+			if got != tc.want {
+				t.Errorf("DeprecatedOptionFound(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			if (got != "") != tc.dotnet {
+				t.Errorf("DeprecatedOptionFound(%q) matched=%v, .NET OrdinalIgnoreCase matched=%v",
+					tc.raw, got != "", tc.dotnet)
+			}
+		})
+	}
+}
+
+// TestDeprecatedOptionFoundDoesNotFoldKelvin is the explicit regression for D2:
+// the old strings.ToLower implementation rejected "S\u212aIPMUXING", which the
+// legacy C# accepted. The KELVIN row of the table above covers this, but this
+// keeps the exact historical input visible.
+func TestDeprecatedOptionFoundDoesNotFoldKelvin(t *testing.T) {
+	t.Parallel()
+	raw := "{\"S\u212aIPMUXING\":true}"
+	if got := DeprecatedOptionFound(raw); got != "" {
+		t.Errorf("DeprecatedOptionFound(%q) = %q, want empty: OrdinalIgnoreCase does not fold U+212A", raw, got)
+	}
+	// The same string with the KELVIN sign folded to a real k is still caught.
+	if got := DeprecatedOptionFound("{\"SkipMuxing\":true}"); got != "SkipMuxing" {
+		t.Errorf("DeprecatedOptionFound() = %q, want SkipMuxing", got)
 	}
 }
 
