@@ -19,6 +19,22 @@ import (
 // a current VapourSynth + L-SMASH: it fails, because `framelist` and the
 // _IFrameList frame property do not exist in any L-SMASH release. See the
 // package report for the full finding.
+//
+// CI coverage: NONE. These two remain manual on purpose. The generated script
+// calls `core.lsmas.LWLibavSource`, so the test needs a VapourSynth build that
+// also loads the L-SMASH-Works plugin. A stock Ubuntu runner cannot supply
+// that: Ubuntu has no current `vapoursynth` binary package at all (the source
+// package has no release in any supported suite; only untrusted PPAs carry it),
+// and no Ubuntu package contains "lsmash" in its name, so `apt-get install
+// vapoursynth` is not a thing and the plugin would have to be built from source
+// against a VapourSynth that is itself not packaged. Until that changes, run
+// these by hand with:
+//
+//	$env:OKEGUIDX_VSPIPE="<path>/vspipe"
+//	$env:OKEGUIDX_IFRAME_VIDEO="<path>/old.mkv"
+//	go test ./internal/jobproc/video/iframe/ -run RealVSPipe -v
+//
+// The skip messages below say the same thing at the point a reader sees them.
 
 // TestRunRealVSPipeScriptIsRejected pins the observed behaviour of the script
 // the legacy code generates. The script is reproduced byte for byte, so this
@@ -28,7 +44,9 @@ func TestRunRealVSPipeScriptIsRejected(t *testing.T) {
 	vspipe := os.Getenv("OKEGUIDX_VSPIPE")
 	video := os.Getenv("OKEGUIDX_IFRAME_VIDEO")
 	if vspipe == "" || video == "" {
-		t.Skip("set OKEGUIDX_VSPIPE and OKEGUIDX_IFRAME_VIDEO to run this test")
+		t.Skip("NOT RUNNING: OKEGUIDX_VSPIPE and/or OKEGUIDX_IFRAME_VIDEO is unset. " +
+			"This needs a real vspipe plus the L-SMASH plugin (core.lsmas), which no " +
+			"Ubuntu package provides, so it is manual-only; see the file comment.")
 	}
 
 	dir := t.TempDir()
@@ -69,7 +87,9 @@ func TestRunRealVSPipeScriptIsRejected(t *testing.T) {
 func TestRunRealVSPipeTracebackIsStructured(t *testing.T) {
 	vspipe := os.Getenv("OKEGUIDX_VSPIPE")
 	if vspipe == "" {
-		t.Skip("set OKEGUIDX_VSPIPE to a vspipe binary to run this test")
+		t.Skip("NOT RUNNING: OKEGUIDX_VSPIPE is unset. This needs a real vspipe " +
+			"plus the L-SMASH plugin (core.lsmas), which no Ubuntu package provides, " +
+			"so it is manual-only; see the file comment.")
 	}
 
 	dir := t.TempDir()

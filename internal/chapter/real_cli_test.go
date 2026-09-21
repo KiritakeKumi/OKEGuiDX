@@ -20,12 +20,30 @@ import (
 //
 // This is what proves the JSON contract in parser.go and probe.go matches what
 // the tools actually print, which a fixture alone cannot.
+//
+// CI coverage (the "Real-tool tests" step of the "build and test" job in
+// .github/workflows/ci.yml). All three of these now run on the Ubuntu runner,
+// so a green CI run is real coverage rather than an implied one:
+//
+//   - TestParserAgainstRealCLI: the workflow builds the CLI with
+//     `make cli` in native/tchapter and points OKEGUIDX_TCHAPTER_FIXTURE at the
+//     git-tracked native/tchapter/testdata/OGM/00001.txt (13 marks, last at
+//     22:41.860 — the assertions below are tied to that exact file).
+//   - TestOGMRoundTripsThroughTheRealCLI: same CLI, no fixture needed.
+//   - TestProbeAgainstRealFFprobe: the workflow installs ffmpeg and points
+//     OKEGUIDX_FFPROBE_FIXTURE at the git-tracked
+//     native/tchapter/testdata/mkv-00001.mkv (a real 29.15 s Matroska file).
+//
+// The skip branches below are therefore only reached when someone runs the
+// suite by hand without the tools; they no longer describe the CI run.
 
 func TestParserAgainstRealCLI(t *testing.T) {
 	tool := os.Getenv("OKEGUIDX_TCHAPTER")
 	fixture := os.Getenv("OKEGUIDX_TCHAPTER_FIXTURE")
 	if tool == "" || fixture == "" {
-		t.Skip("set OKEGUIDX_TCHAPTER and OKEGUIDX_TCHAPTER_FIXTURE to run")
+		t.Skip("NOT RUNNING: OKEGUIDX_TCHAPTER and/or OKEGUIDX_TCHAPTER_FIXTURE is unset. " +
+			"Set both to a built native/tchapter/build/tchapter[.exe] and a chapter file " +
+			"(native/tchapter/testdata/OGM/00001.txt) to run this against the real CLI.")
 	}
 
 	info, err := (&Parser{Tool: tool}).ParseFirst(t.Context(), fixture)
@@ -56,7 +74,8 @@ func TestParserAgainstRealCLI(t *testing.T) {
 func TestOGMRoundTripsThroughTheRealCLI(t *testing.T) {
 	tool := os.Getenv("OKEGUIDX_TCHAPTER")
 	if tool == "" {
-		t.Skip("set OKEGUIDX_TCHAPTER to run")
+		t.Skip("NOT RUNNING: OKEGUIDX_TCHAPTER is unset. Set it to a built " +
+			"native/tchapter/build/tchapter[.exe] to run this against the real CLI.")
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ep01.txt")
@@ -95,7 +114,9 @@ func TestProbeAgainstRealFFprobe(t *testing.T) {
 	tool := os.Getenv("OKEGUIDX_FFPROBE")
 	fixture := os.Getenv("OKEGUIDX_FFPROBE_FIXTURE")
 	if tool == "" || fixture == "" {
-		t.Skip("set OKEGUIDX_FFPROBE and OKEGUIDX_FFPROBE_FIXTURE to run")
+		t.Skip("NOT RUNNING: OKEGUIDX_FFPROBE and/or OKEGUIDX_FFPROBE_FIXTURE is unset. " +
+			"Set both to an ffprobe executable and a media file with a duration " +
+			"(native/tchapter/testdata/mkv-00001.mkv) to run this against the real tool.")
 	}
 
 	res, err := (&Probe{Tool: tool}).Run(t.Context(), fixture)

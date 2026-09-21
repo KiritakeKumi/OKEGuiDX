@@ -41,6 +41,37 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      - name: Build the tchapter CLI
+        # The chapter real-tool tests below drive this binary. libtchapter has no
+        # dependencies beyond libc, so `make` and the host `cc` are enough; the
+        # `tchapter` job already builds the same sources for other arches.
+        working-directory: native/tchapter
+        run: make cli
+
+      - name: Install ffmpeg
+        # The runner image does not ship ffmpeg/ffprobe, so install it unless the
+        # exact binary the test step names is already there. Ubuntu's ffmpeg
+        # package installs the probe at /usr/bin/ffprobe.
+        run: |
+          if [ ! -x /usr/bin/ffprobe ]; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+
+      - name: Real-tool tests (chapter)
+        # These are the tests that skip in a plain `go test ./...` because they
+        # need real tools. The env vars are scoped to this step only: the main
+        # Test step above runs before the CLI exists, so setting them job-wide
+        # would turn a skip into a failure there.
+        env:
+          OKEGUIDX_TCHAPTER: ${{ github.workspace }}/native/tchapter/build/tchapter
+          OKEGUIDX_TCHAPTER_FIXTURE: ${{ github.workspace }}/native/tchapter/testdata/OGM/00001.txt
+          OKEGUIDX_FFPROBE: /usr/bin/ffprobe
+          OKEGUIDX_FFPROBE_FIXTURE: ${{ github.workspace }}/native/tchapter/testdata/mkv-00001.mkv
+        run: |
+          go test -count=1 -v ./internal/chapter/ \
+            -run 'TestParserAgainstRealCLI|TestOGMRoundTripsThroughTheRealCLI|TestProbeAgainstRealFFprobe'
+
       - name: Build all five targets
         # The engine is pure Go on purpose: cgo would cost cross-compilation for
         # every target, including riscv64 (PLAN.md §3).
