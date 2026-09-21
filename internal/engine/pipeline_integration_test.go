@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -225,20 +227,66 @@ func TestPipelineSubtitleRouting(t *testing.T) {
 
 // TestPipelineProfileIsReReadForAQueuedTask proves the LoadProfile hook is used
 // when a task arrives without typed values, which is the crash-recovery path.
-func TestPipelineProfileIsReReadForAQueuedTask(t *testing.T) {
+// TestPipelineQueuedTaskUsesItsStoredProfile covers crash recovery.
+//
+// The queue stores the assembled profile, and reading the queue back turns it
+// into a generic map. The pipeline must decode that copy, because the profile
+// file on disk never carried the generated InputScript or the two derived path
+// prefixes - the wizard derived them and did not write them back - so re-reading
+// the file leaves the task unable to run at all ("工作目录没有指定").
+func TestPipelineQueuedTaskUsesItsStoredProfile(t *testing.T) {
 	dir := t.TempDir()
 	ft := newFakeTools(t, dir, capsWith(node.FeatureEac3to, node.FeatureAAC), normalSpec())
 	prof := makeProfile(dir, func(p *profile.Profile) {
 		p.AudioTracks = []profile.AudioTrackSpec{normalAudioTrack()}
 	})
 	task := prepare(t, ft, prof, nil)
-	// Simulate a JSON round trip: the profile becomes an opaque map.
-	task.Profile = map[string]any{"Version": 3}
+
+	// The queue round trip: marshal the task, read it back, keep the generic
+	// values only.
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+	recovered := &model.Task{}
+	if err := json.Unmarshal(raw, recovered); err != nil {
+		t.Fatalf("unmarshal task: %v", err)
+	}
+	if _, ok := recovered.Profile.(*profile.Profile); ok {
+		t.Fatal("the round trip kept the typed profile; this test would prove nothing")
+	}
+	ft.installEnv(t, prof.WorkingPathPrefix, recovered.Inputs[0].Resolve(ft.caps.Volumes))
+
+	opts := ft.options(t)
+	loaded := false
+	opts.LoadProfile = func(*model.Task) (*profile.Profile, *profile.EpisodeConfig, error) {
+		loaded = true
+		return nil, nil, errors.New("the loader must not be reached")
+	}
+	if _, err := runPipeline(t, opts, recovered); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if loaded {
+		t.Error("the pipeline re-read the profile file instead of using the queued one")
+	}
+}
+
+// TestPipelineFallsBackToTheLoaderWhenTheTaskCarriesNothing covers the other
+// half of profileFor: a task with no stored profile at all gets one from the
+// caller's loader.
+func TestPipelineFallsBackToTheLoaderWhenTheTaskCarriesNothing(t *testing.T) {
+	dir := t.TempDir()
+	ft := newFakeTools(t, dir, capsWith(node.FeatureEac3to, node.FeatureAAC), normalSpec())
+	prof := makeProfile(dir, func(p *profile.Profile) {
+		p.AudioTracks = []profile.AudioTrackSpec{normalAudioTrack()}
+	})
+	task := prepare(t, ft, prof, nil)
+	task.Profile = nil
 	ft.installEnv(t, prof.WorkingPathPrefix, task.Inputs[0].Resolve(ft.caps.Volumes))
 
 	opts := ft.options(t)
 	loaded := false
-	opts.LoadProfile = func(t *model.Task) (*profile.Profile, *profile.EpisodeConfig, error) {
+	opts.LoadProfile = func(*model.Task) (*profile.Profile, *profile.EpisodeConfig, error) {
 		loaded = true
 		return LoadProfileFromDisk(prof.ConfigFilePath)
 	}
@@ -246,7 +294,7 @@ func TestPipelineProfileIsReReadForAQueuedTask(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 	if !loaded {
-		t.Error("the pipeline did not call LoadProfile for a task without typed values")
+		t.Error("the pipeline did not call LoadProfile for a task with no profile")
 	}
 }
 

@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"encoding/json"
+
 	"github.com/KiritakeKumi/OKEGuiDX/internal/log"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/model"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
@@ -78,7 +80,57 @@ func (p *Pipeline) profileFor(t *model.Task) (*profile.Profile, *profile.Episode
 		}
 		return prof, nil, nil
 	}
+	// A task read back from queue.json holds these as generic JSON values. The
+	// queue's copy is the assembled profile, so it is the one to use; see
+	// reviveStored. The caller's loader is the fallback, for a task that
+	// carries nothing at all.
+	if prof, cfg, ok := reviveStored(t); ok {
+		return prof, cfg, nil
+	}
 	return p.opts.LoadProfile(t)
+}
+
+// reviveStored decodes the profile and episode config a queued task carries.
+//
+// model.Task holds both as `any` because the model package cannot import
+// profile (profile imports model). A task that never left this process still
+// holds the typed values, which profileFor uses directly. A task read back from
+// queue.json holds them as map[string]any instead, and re-decoding is the only
+// way to use them.
+//
+// Using them is the point: the queue stores the *assembled* profile, which
+// carries the generated InputScript and the two derived path prefixes, while the
+// profile file on disk does not, because the wizard derived those and never
+// wrote them back. Re-reading the file instead - which is what happened before
+// this existed - fails validateForRun with "工作目录没有指定", so a task that
+// survived a restart could never run again.
+func reviveStored(t *model.Task) (*profile.Profile, *profile.EpisodeConfig, bool) {
+	if t == nil || t.Profile == nil {
+		return nil, nil, false
+	}
+	raw, err := json.Marshal(t.Profile)
+	if err != nil {
+		return nil, nil, false
+	}
+	prof := &profile.Profile{}
+	// UnmarshalJSON is the tolerant decoder the profile format needs, and it
+	// rejects a payload that is not a profile at all.
+	if err := prof.UnmarshalJSON(raw); err != nil {
+		return nil, nil, false
+	}
+	var cfg *profile.EpisodeConfig
+	if t.Config != nil {
+		rawCfg, err := json.Marshal(t.Config)
+		if err != nil {
+			return nil, nil, false
+		}
+		c := &profile.EpisodeConfig{}
+		if err := json.Unmarshal(rawCfg, c); err != nil {
+			return nil, nil, false
+		}
+		cfg = c
+	}
+	return prof, cfg, true
 }
 
 // validateForRun re-applies the checks the pipeline relies on. It is deliberately
