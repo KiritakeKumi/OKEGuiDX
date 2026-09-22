@@ -9,7 +9,16 @@
 CC      ?= cc
 AR      ?= ar
 CFLAGS  ?= -O2 -g
+# The shared library is built from the same objects as the static one, so those
+# objects must be position independent or the link fails on targets that check
+# (riscv64: "relocation R_RISCV_TPREL_HI20 ... recompile with -fPIC").
+CFLAGS  += -fPIC
 CSTD    := -std=c11
+
+# tc_expression.c evaluates the chapter-name expression language and calls the
+# libm functions (pow/atan2/fmod/sin/...). glibc and musl do not put libm in the
+# default link set, so every executable that links libtchapter has to name it.
+LDLIBS  := -lm
 
 WARNINGS := -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion \
             -Wpointer-arith -Wcast-qual -Wstrict-prototypes \
@@ -79,13 +88,13 @@ $(LIB_SHARED): $(LIB_OBJS)
 cli: $(OBJDIR)/tchapter
 
 $(OBJDIR)/tchapter: $(SRCDIR)/tc_cli.c $(LIB_STATIC) | $(OBJDIR)
-	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $< $(LIB_STATIC) -o $@
+	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $< $(LIB_STATIC) -o $@ $(LDLIBS)
 
 test: $(OBJDIR)/tc_test
 	cd . && $(OBJDIR)/tc_test
 
 $(OBJDIR)/tc_test: $(TEST_OBJS) $(LIB_STATIC) | $(OBJDIR)
-	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $(TEST_OBJS) $(LIB_STATIC) -o $@
+	$(CC) $(CSTD) $(CFLAGS) $(WARNINGS) -I$(INCDIR) -I$(SRCDIR) $(TEST_OBJS) $(LIB_STATIC) -o $@ $(LDLIBS)
 
 # clang-format is the single formatter for C sources in this repository.
 fmt:
