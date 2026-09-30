@@ -374,6 +374,17 @@ func checkReEncodeContainer(prof *profile.Profile) error {
 // records that same form. The legacy code ran on Windows only, where that was
 // the separator anyway; keeping it fixed makes the derived directory names
 // identical on every platform, which matters as soon as a cluster mixes nodes.
+//
+// The legacy algebra had an explicit volume level at the front of the component
+// list: escaping the drive turned "D:\..." into "D_\...", whose first component
+// is "D_". A rooted POSIX path has no drive, and splitComponents drops the empty
+// level the leading separator denotes, so the first real directory would take
+// the volume's place — it would be dropped from the CRC prefix and from the
+// rebuilt path. When the strip list removed every directory level, the result
+// also stayed rooted and combineLikeDotNet returned it as it was, putting the
+// working directory at the filesystem root. An explicit empty volume level is
+// therefore prepended for a rooted path that has no drive, and the suffix is
+// made relative, which is what the drive case already produces on Windows.
 func PathSuffix(inputFile string, reducePath bool) (string, ReducePathMap, error) {
 	if strings.TrimSpace(inputFile) == "" {
 		return "", ReducePathMap{}, okerr.New(okerr.KindConfig, "输入文件不合法",
@@ -385,29 +396,53 @@ func PathSuffix(inputFile string, reducePath bool) (string, ReducePathMap, error
 	}
 
 	components := splitComponents(suffix)
-	if len(components) <= 3 || !reducePath {
+	if len(components) == 0 {
 		return suffix, ReducePathMap{}, nil
 	}
 
-	// components[0] is the drive, the last is the file name, and everything
-	// between them is the effective path the legacy code reduced.
+	// A rooted path with no escaped drive is the POSIX case. Supply the empty
+	// volume level the escaped drive would have contributed, so the arithmetic
+	// below treats every platform the same. The level is empty rather than a
+	// placeholder because that is exactly what this platform's "D_" equivalent
+	// is: on Windows the drive escape yields "D_" and it is the first component
+	// of the result; with no drive there is nothing to put there.
+	relative := suffix
+	if filepath.IsAbs(suffix) {
+		components = append([]string{""}, components...)
+		relative = strings.Join(components[1:], string(filepath.Separator))
+	}
+
+	// join mirrors the legacy rebuild. An empty volume level contributes no
+	// separator either, which is what keeps the POSIX result relative; the
+	// Windows case never has an empty first component, so it is unaffected.
+	join := func(parts []string) string {
+		if parts[0] == "" {
+			return strings.Join(parts[1:], string(filepath.Separator))
+		}
+		return strings.Join(parts, string(filepath.Separator))
+	}
+
+	if len(components) <= 3 || !reducePath {
+		return relative, ReducePathMap{}, nil
+	}
+
+	// components[0] is the volume level, the last is the file name, and
+	// everything between them is the effective path the legacy code reduced.
 	last := components[len(components)-2]
 	file := components[len(components)-1]
 
 	if volNumberPattern.MatchString(last) {
 		// A volume number already makes the level unique, so it is kept as the
 		// effective path. The middle levels are dropped either way: the legacy
-		// code rebuilt the path from [drive, effectivePath, file] in both
+		// code rebuilt the path from [volume, effectivePath, file] in both
 		// branches, and only the effective path differed.
-		return strings.Join([]string{components[0], last, file}, string(filepath.Separator)),
-			ReducePathMap{}, nil
+		return join([]string{components[0], last, file}), ReducePathMap{}, nil
 	}
 
 	prefix := strings.Join(components[1:len(components)-2], `\`)
 	sum := crc32.ChecksumIEEE([]byte(prefix))
 	shortened := upperHex8(sum) + "-" + last
-	reduced := strings.Join([]string{components[0], shortened, file}, string(filepath.Separator))
-	return reduced, ReducePathMap{CRC: sum, Prefix: prefix}, nil
+	return join([]string{components[0], shortened, file}), ReducePathMap{CRC: sum, Prefix: prefix}, nil
 }
 
 // EpisodeConfigPath returns the per-episode configuration that sits next to a
@@ -494,6 +529,17 @@ func combineLikeDotNet(dir, suffix string) string {
 		return suffix
 	}
 	return filepath.Join(dir, suffix)
+}
+
+// IsRooted reports whether path is absolute for the current platform, or starts
+// with a Windows drive.
+//
+// It is exported so the CLI and the API judge rootedness exactly as the wizard
+// does. They resolve the same profile entries, and a disagreement moves the
+// input: the wizard would keep "E:\media\in.m2ts" as written while filepath
+// would append it to the profile directory off Windows.
+func IsRooted(path string) bool {
+	return isRooted(path)
 }
 
 // isRooted reports whether path is absolute for the current platform, or starts
@@ -603,6 +649,17 @@ func underscoreLevel(path string, from int) int {
 // It mirrors the legacy `Split(new[] {'/', '\\'}, RemoveEmptyEntries)`.
 func splitComponents(path string) []string {
 	return strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
+}
+
+// NormalizeSeparators rewrites both separators to the OS separator. .NET
+// treated both as separators, and a profile is usually authored on Windows, so
+// a source entry may use either one.
+//
+// It is exported because the API layer resolves the same profile entries
+// against the same directory; both must agree on the resulting path or a task
+// is rejected for an input file that exists.
+func NormalizeSeparators(path string) string {
+	return normalizeSeparators(path)
 }
 
 // normalizeSeparators rewrites both separators to the OS separator. .NET

@@ -852,11 +852,22 @@ func profileObjectGiven(raw json.RawMessage) bool {
 
 // resolveRelative resolves a path from a profile against the profile's
 // directory, mirroring PathUtils.GetFullPath: an absolute path is kept as-is.
+//
+// The separators are normalised first, exactly as wizard.resolveInput does for
+// the same profile entry. A profile is usually authored on Windows and may
+// spell a source "Main_Disc\BDMV\STREAM\00000.m2ts"; without this step the API
+// would keep the backslashes, filepath.IsAbs and filepath.Join would not treat
+// them as separators, and the path it resolved would not equal the one the
+// wizard derived from the identical entry. That mismatch used to surface as a
+// 404 "找不到输入文件" on a source that was in fact present.
 func resolveRelative(rel, dir string) string {
 	if rel == "" {
 		return ""
 	}
-	if filepath.IsAbs(rel) {
+	rel = wizard.NormalizeSeparators(rel)
+	// wizard.IsRooted, not filepath.IsAbs: a profile entry may carry a Windows
+	// drive, which filepath does not call absolute off Windows.
+	if wizard.IsRooted(rel) {
 		return filepath.Clean(rel)
 	}
 	if dir == "" {

@@ -92,8 +92,8 @@ func (s *Service) HasBlurayStructure(task *model.Task) bool {
 		log.Warn("输入文件不在BDMV文件夹结构内", "file", input)
 		return false
 	}
-	playlist := filepath.Join(filepath.Dir(streamDir), "PLAYLIST")
-	if st, err := os.Stat(playlist); err != nil || !st.IsDir() {
+	playlist, ok := siblingDir(filepath.Dir(streamDir), "PLAYLIST")
+	if !ok {
 		log.Warn("输入文件没有上级的PLAYLIST文件夹", "file", input)
 		return false
 	}
@@ -271,15 +271,18 @@ func (s *Service) LoadChapter(ctx context.Context, task *model.Task) (*Info, err
 // `chapter.SourceName + ".m2ts" == inputFile.Name`.
 func (s *Service) loadFromPlaylist(ctx context.Context, task *model.Task) (*Info, error) {
 	input := s.inputPath(task)
-	playlistDir := filepath.Join(filepath.Dir(filepath.Dir(input)), "PLAYLIST")
-
-	entries, err := os.ReadDir(playlistDir)
-	if err != nil {
-		return nil, okerr.Wrap(err, okerr.KindNotFound, "找不到PLAYLIST文件夹",
-			"%s: %v", playlistDir, err).WithFile(playlistDir)
+	playlistDir, ok := siblingDir(filepath.Dir(filepath.Dir(input)), "PLAYLIST")
+	if !ok {
+		return nil, okerr.New(okerr.KindNotFound, "找不到PLAYLIST文件夹",
+			"%s: 没有找到PLAYLIST文件夹", input).WithFile(input)
 	}
 
 	clip := stemOf(filepath.Base(input))
+	entries, err := os.ReadDir(playlistDir)
+	if err != nil {
+		return nil, okerr.Wrap(err, okerr.KindNotFound, "无法读取PLAYLIST文件夹",
+			"%s: %v", playlistDir, err).WithFile(playlistDir)
+	}
 	for _, e := range entries {
 		if e.IsDir() || !wildcard.Match(e.Name(), "*.mpls") {
 			continue
@@ -415,6 +418,29 @@ func timesMS(info *Info) string {
 		b.WriteString(strconv.FormatInt(c.Time.Milliseconds(), 10))
 	}
 	return b.String()
+}
+
+// siblingDir finds a subdirectory of parent whose name is name, ignoring case,
+// and returns its real on-disk path.
+//
+// The disc layout is spelled inconsistently in the wild: a real disc uses
+// "BDMV/PLAYLIST", but a tree copied by hand, or extracted by a tool that
+// lowercased names, may carry "playlist". Windows hid that from the legacy code
+// because its filesystem is case-insensitive, so os.Stat on a hardcoded
+// "PLAYLIST" found "playlist" anyway. On Linux it does not, and the whole
+// Blu-ray branch silently reports "no disc structure". Resolving the name
+// against the directory listing keeps the Windows behaviour on every platform.
+func siblingDir(parent, name string) (string, bool) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.EqualFold(e.Name(), name) {
+			return filepath.Join(parent, e.Name()), true
+		}
+	}
+	return "", false
 }
 
 // inputPath resolves the task's first input.

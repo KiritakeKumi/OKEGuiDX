@@ -460,11 +460,21 @@ func encoderFor(caps node.Capabilities) func(profile.EncoderType) (string, bool)
 
 // resolveFrom resolves a profile-relative path. An absolute path is returned
 // unchanged, mirroring PathUtils.GetFullPath.
+//
+// The separators are normalised before the rootedness test and the join, for
+// the same reason as api.resolveRelative: a profile authored on Windows spells
+// its entries with backslashes, and filepath does not treat those as
+// separators off Windows. Without this, "E:\media\in.m2ts" is neither absolute
+// nor joined correctly and the CLI looks for the file under the profile
+// directory.
 func resolveFrom(dir, rel string) string {
 	if rel == "" {
 		return ""
 	}
-	if filepath.IsAbs(rel) {
+	rel = wizard.NormalizeSeparators(rel)
+	// wizard.IsRooted, not filepath.IsAbs: a profile entry may carry a Windows
+	// drive, which filepath does not call absolute off Windows.
+	if wizard.IsRooted(rel) {
 		return rel
 	}
 	return filepath.Join(dir, rel)
