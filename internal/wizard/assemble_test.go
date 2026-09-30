@@ -55,26 +55,58 @@ func legacyWorking(projectDir, inputFile string, reducePath bool) string {
 	for _, comp := range StripComponents {
 		suffix = legacyStrip(suffix, comp)
 	}
-	components := splitComponents(suffix)
-	if len(components) > 3 && reducePath {
+
+	// The legacy component list always began with a volume level, because
+	// escaping the drive turned "D:\a" into "D_\a". A rooted path with no drive
+	// has no such level: the leading separator is dropped and the rebuilt path
+	// stays relative, which is what keeps the working tree under the project
+	// directory rather than at the filesystem root.
+	volume, rest := legacyVolume(suffix)
+	components := splitComponents(rest)
+	if len(components)+1 > 3 && len(components) >= 2 && reducePath {
 		last := components[len(components)-2]
 		file := components[len(components)-1]
-		if volNumberPattern.MatchString(last) {
-			suffix = strings.Join([]string{components[0], last, file}, string(filepath.Separator))
-		} else {
-			prefix := strings.Join(components[1:len(components)-2], `\`)
-			suffix = strings.Join([]string{
-				components[0],
-				upperHex8(crc32.ChecksumIEEE([]byte(prefix))) + "-" + last,
-				file,
-			}, string(filepath.Separator))
+		effective := last
+		if !volNumberPattern.MatchString(last) {
+			prefix := strings.Join(components[:len(components)-2], `\`)
+			effective = upperHex8(crc32.ChecksumIEEE([]byte(prefix))) + "-" + last
 		}
+		rest = strings.Join([]string{effective, file}, string(filepath.Separator))
 	}
 
-	if isRooted(suffix) {
-		return suffix
+	if volume == "" {
+		return filepath.Join(dir, rest)
 	}
-	return filepath.Join(dir, suffix)
+	rebuilt := volume + string(filepath.Separator) + rest
+	if isRooted(rebuilt) {
+		return rebuilt
+	}
+	return filepath.Join(dir, rebuilt)
+}
+
+// legacyVolume splits the escaped suffix into the leading volume level and the
+// levels below it. On Windows that level is the escaped drive ("D_"); a rooted
+// path with no drive has none.
+func legacyVolume(suffix string) (volume, rest string) {
+	if filepath.IsAbs(suffix) {
+		return "", strings.TrimLeft(suffix, `/\`)
+	}
+	parts := splitComponents(suffix)
+	if len(parts) < 2 {
+		return "", suffix
+	}
+	return parts[0], strings.Join(parts[1:], string(filepath.Separator))
+}
+
+// reduceGuard is the legacy `inputSuffixComponents.Length > 3` test, whose list
+// included the volume level. A rooted path with no drive has no volume level in
+// the stripped suffix, so that slot is accounted for explicitly.
+func reduceGuard(stripped, input string) bool {
+	n := len(splitComponents(stripped))
+	if !hasDrivePrefix(normalizeSeparators(input)) {
+		n++ // the volume slot the legacy list always carried
+	}
+	return n > 3
 }
 
 // legacyStrip is the .NET Regex.Replace scan: leftmost match, then resume after
@@ -204,14 +236,14 @@ func TestDeriveFromRealProfile(t *testing.T) {
 	}
 
 	// The three inputs share a parent, so reducePath records one entry — unless
-	// the project directory is shallow enough that the stripped path has three
-	// components or fewer, in which case the legacy code did not shorten at all.
+	// the project directory is shallow enough that the legacy component list had
+	// three entries or fewer, in which case the code did not shorten at all.
 	if len(res.ReducePathMap) == 0 {
 		stripped, _, err := PathSuffix(filepath.Join(dir, normalizeSeparators(p.InputFiles[0])), false)
 		if err != nil {
 			t.Fatalf("PathSuffix() error = %v", err)
 		}
-		if len(splitComponents(stripped)) <= 3 {
+		if !reduceGuard(stripped, p.InputFiles[0]) {
 			t.Skipf("the project directory %q is too shallow for reducePath", dir)
 		}
 		t.Fatalf("ReducePathMap is empty, want one entry for %q", stripped)
@@ -347,7 +379,7 @@ func TestDeriveTooFewComponents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PathSuffix(%q) error = %v", input, err)
 			}
-			tooShort := len(splitComponents(stripped)) <= 3
+			tooShort := !reduceGuard(stripped, input)
 			if !tooShort {
 				t.Skipf("%q has more than three components on this platform; covered by the shortening tests", input)
 			}
@@ -390,10 +422,10 @@ func TestDeriveReducesExactlyAboveThreeComponents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PathSuffix(%q) error = %v", input, err)
 			}
-			wantReduced := len(splitComponents(stripped)) > 3
+			wantReduced := reduceGuard(stripped, input)
 			if gotReduced := len(res.ReducePathMap) == 1; gotReduced != wantReduced {
-				t.Errorf("reduced = %v, want %v (%q has %d components)",
-					gotReduced, wantReduced, stripped, len(splitComponents(stripped)))
+				t.Errorf("reduced = %v, want %v (stripped %q)",
+					gotReduced, wantReduced, stripped)
 			}
 			// The derived path always matches the legacy expression, reduced or
 			// not.

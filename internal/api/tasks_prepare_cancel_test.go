@@ -455,10 +455,10 @@ func TestTaskAddWriteVpyUsesReducePathFromTheConfig(t *testing.T) {
 				t.Fatal("the queued task does not carry a typed profile")
 			}
 
-			// The escaped drive level ("C_") is what the legacy expression
-			// produced; the shortening replaces the levels between the drive and
-			// the file with "<CRC>-D".
-			want := filepath.Join(env.fix.dir, "C_", "A", "B", "C", "D", "00000.m2ts")
+			// The escaped drive level ("C_" on Windows, empty off it) is what the
+			// legacy expression produced; the shortening replaces the levels
+			// between the drive and the file with "<CRC>-D".
+			want := filepath.Join(env.fix.dir, driveLevelOf(env.fix.dir), "A", "B", "C", "D", "00000.m2ts")
 			if tc.wantShortened {
 				if !strings.Contains(prof.WorkingPathPrefix, "-D") {
 					t.Errorf("working prefix = %q, want the shortened form", prof.WorkingPathPrefix)
@@ -480,6 +480,18 @@ func TestTaskAddWriteVpyUsesReducePathFromTheConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// driveLevelOf is the escaped drive level the legacy `Replace(':', '_')`
+// produced for an absolute Windows path: "C_" becomes the "output" directory
+// after outputPath runs. A platform whose absolute paths have no drive yields
+// "", and the expectations degrade to the path the legacy code would have
+// produced there.
+func driveLevelOf(dir string) string {
+	if len(dir) < 2 || dir[1] != ':' {
+		return ""
+	}
+	return string(dir[0]) + "_"
 }
 
 // TestTaskCancelRunning covers the running half of B3: the task really stops,

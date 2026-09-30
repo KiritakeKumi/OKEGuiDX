@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,18 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/proc"
 )
+
+// volumeRoot is the volume the path cases below live on: a real drive on
+// Windows; the filesystem root on POSIX, where "D:\x" is an ordinary file name
+// rather than a path. Every case builds both its inputs and its expectations
+// from it, so one set of cases exercises path handling meaningfully on both
+// platforms instead of pinning a Windows literal as input to filepath.Dir.
+func volumeRoot() string {
+	if runtime.GOOS == "windows" {
+		return `D:\`
+	}
+	return "/"
+}
 
 // --- track enumeration -----------------------------------------------------
 
@@ -250,44 +263,44 @@ func TestOutFileName(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "windows paths",
-			source: `D:\BDMV\STREAM\00001.m2ts`,
-			prefix: `D:\work\00001`,
+			name:   "volume root paths",
+			source: filepath.Join(volumeRoot(), "BDMV", "STREAM", "00001.m2ts"),
+			prefix: filepath.Join(volumeRoot(), "work", "00001"),
 			index:  3,
 			codec:  CodecTrueHDAC3,
-			want:   `D:\work\00001_3.flac`,
+			want:   filepath.Join(volumeRoot(), "work", "00001_3.flac"),
 		},
 		{
 			name:   "the working prefix contributes only its directory",
-			source: `D:\BDMV\STREAM\00001.m2ts`,
-			prefix: `D:\work\00001` + "_part0",
+			source: filepath.Join(volumeRoot(), "BDMV", "STREAM", "00001.m2ts"),
+			prefix: filepath.Join(volumeRoot(), "work", "00001") + "_part0",
 			index:  5,
 			codec:  CodecAC3,
-			want:   `D:\work\00001_5.ac3`,
+			want:   filepath.Join(volumeRoot(), "work", "00001_5.ac3"),
 		},
 		{
 			name:   "source stem is used, not the prefix name",
-			source: `E:\in\FEATURE_1.evo`,
-			prefix: `E:\out\whatever`,
+			source: filepath.Join(volumeRoot(), "in", "FEATURE_1.evo"),
+			prefix: filepath.Join(volumeRoot(), "out", "whatever"),
 			index:  2,
 			codec:  CodecDTSMA,
-			want:   `E:\out\FEATURE_1_2.flac`,
+			want:   filepath.Join(volumeRoot(), "out", "FEATURE_1_2.flac"),
 		},
 		{
 			name:   "two-digit index",
-			source: `D:\in\movie.mkv`,
-			prefix: `D:\work\movie`,
+			source: filepath.Join(volumeRoot(), "in", "movie.mkv"),
+			prefix: filepath.Join(volumeRoot(), "work", "movie"),
 			index:  12,
 			codec:  CodecPGS,
-			want:   `D:\work\movie_12.sup`,
+			want:   filepath.Join(volumeRoot(), "work", "movie_12.sup"),
 		},
 		{
 			name:   "a VobSub track keeps its extension even though it is never written",
-			source: `D:\in\movie.mkv`,
-			prefix: `D:\work\movie`,
+			source: filepath.Join(volumeRoot(), "in", "movie.mkv"),
+			prefix: filepath.Join(volumeRoot(), "work", "movie"),
 			index:  7,
 			codec:  CodecVobSub,
-			want:   `D:\work\movie_7.sub`,
+			want:   filepath.Join(volumeRoot(), "work", "movie_7.sub"),
 		},
 	}
 	for _, tc := range cases {
@@ -859,8 +872,8 @@ func TestPlanExtraction(t *testing.T) {
 			t.Parallel()
 			tracks := newTracks()
 			for _, tr := range tracks {
-				tr.SourceFile = `D:\src\00001.m2ts`
-				tr.WorkingPathPrefix = `D:\work\00001`
+				tr.SourceFile = filepath.Join(volumeRoot(), "src", "00001.m2ts")
+				tr.WorkingPathPrefix = filepath.Join(volumeRoot(), "work", "00001")
 			}
 			p := New(Options{})
 			plan := p.planExtraction(tracks, tc.audio, tc.subs)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/KiritakeKumi/OKEGuiDX/internal/jobproc"
@@ -27,6 +28,19 @@ const root = ""
 
 // localPath is the path mkvmerge receives for a reference below root.
 func localPath(rel string) string { return model.NewFileRef(rel).ResolveLocal(root) }
+
+// volumeRoot is the root the hand-written path cases use: a real drive on
+// Windows; the filesystem root on POSIX, where "V:\..." is an ordinary file
+// name rather than a path. TestBuildArgs keeps its literals because it compares
+// the builder against itself through localPath; the test that pins a command
+// line independently builds its paths from this root with filepath.Join so it
+// stays meaningful on both platforms.
+func volumeRoot() string {
+	if runtime.GOOS == "windows" {
+		return `V:\`
+	}
+	return "/"
+}
 
 // trackInfo builds the Info of a track under test.
 func trackInfo(mux model.MuxOption, language, name string, order int) model.Info {
@@ -427,50 +441,58 @@ func TestBuildArgs(t *testing.T) {
 // TestBuildArgs spells its paths with localPath, which is NewFileRef().ResolveLocal:
 // the expected argv and the argv under test share the code path, so a regression
 // in FileRef.ResolveLocal leaves that test green. This test carries the paths as
-// literals with real drive letters, so only the builder can change them.
+// explicit literals with a real volume root, so only the builder can change
+// them. The root is the drive on Windows and the filesystem root on POSIX,
+// where a "V:\..." literal would be a file name rather than a path.
 func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
 	t.Parallel()
 
+	// Every path is joined by hand from the volume root, not resolved from a
+	// FileRef, so this test stays independent of the code path it guards.
+	volume := volumeRoot()
+	mediaDir := filepath.Join(volume, "media", "ep01")
+	outPath := filepath.Join(volume, "out", "ep01.mkv")
+
 	media := &model.MediaFile{
-		Video: videoTrack(`V:\media\ep01\v.hevc`, `V:\media\ep01\ep01.v2.tcfile`),
+		Video: videoTrack(filepath.Join(mediaDir, "v.hevc"), filepath.Join(mediaDir, "ep01.v2.tcfile")),
 		AudioTracks: []*model.AudioTrack{
-			audioTrack(`V:\media\ep01\a1.flac`, model.MuxOptionDefault, "jpn", "Main", 0),
-			audioTrack(`V:\media\ep01\a2.flac`, model.MuxOptionMka, "eng", "Commentary", 1),
-			audioTrack(`V:\media\ep01\a3.flac`, model.MuxOptionExternal, "jpn", "Ext", 2),
-			audioTrack(`V:\media\ep01\a4.flac`, model.MuxOptionExtractOnly, "jpn", "", 3),
-			audioTrack(`V:\media\ep01\a5.flac`, model.MuxOptionSkip, "jpn", "", 4),
+			audioTrack(filepath.Join(mediaDir, "a1.flac"), model.MuxOptionDefault, "jpn", "Main", 0),
+			audioTrack(filepath.Join(mediaDir, "a2.flac"), model.MuxOptionMka, "eng", "Commentary", 1),
+			audioTrack(filepath.Join(mediaDir, "a3.flac"), model.MuxOptionExternal, "jpn", "Ext", 2),
+			audioTrack(filepath.Join(mediaDir, "a4.flac"), model.MuxOptionExtractOnly, "jpn", "", 3),
+			audioTrack(filepath.Join(mediaDir, "a5.flac"), model.MuxOptionSkip, "jpn", "", 4),
 		},
 		SubtitleTracks: []*model.SubtitleTrack{
-			subtitleTrack(`V:\media\ep01\s1.ass`, model.MuxOptionDefault, "jpn", "", 0),
-			subtitleTrack(`V:\media\ep01\s2.ass`, model.MuxOptionMka, "eng", "Signs", 1),
+			subtitleTrack(filepath.Join(mediaDir, "s1.ass"), model.MuxOptionDefault, "jpn", "", 0),
+			subtitleTrack(filepath.Join(mediaDir, "s2.ass"), model.MuxOptionMka, "eng", "Signs", 1),
 		},
-		Chapter: chapterTrack(`V:\media\ep01\ep01.txt`, "jpn"),
+		Chapter: chapterTrack(filepath.Join(mediaDir, "ep01.txt"), "jpn"),
 	}
 	got := BuildArgs(Options{
 		Mkvmerge: `C:\tools\mkvtoolnix\mkvmerge.exe`,
-		Output:   `V:\out\ep01.mkv`,
+		Output:   outPath,
 		Media:    media,
 	})
 	want := []string{
 		"--ui-language", "en",
-		"--output", `V:\out\ep01.mkv`,
-		"--timestamps", `0:V:\media\ep01\ep01.v2.tcfile`,
+		"--output", outPath,
+		"--timestamps", "0:" + filepath.Join(mediaDir, "ep01.v2.tcfile"),
 		"--default-track", "0:1",
 		"--language", "0:und",
 		"--track-name", "0:",
-		"(", `V:\media\ep01\v.hevc`, ")",
+		"(", filepath.Join(mediaDir, "v.hevc"), ")",
 		"--no-track-tags", "--no-global-tags",
 		"--default-track", "0:1",
 		"--language", "0:jpn",
 		"--track-name", "0:Main",
-		"(", `V:\media\ep01\a1.flac`, ")",
+		"(", filepath.Join(mediaDir, "a1.flac"), ")",
 		"--no-track-tags", "--no-global-tags",
 		"--default-track", "0:0",
 		"--language", "0:jpn",
 		"--track-name", "0:",
-		"(", `V:\media\ep01\s1.ass`, ")",
+		"(", filepath.Join(mediaDir, "s1.ass"), ")",
 		"--chapter-language", "jpn",
-		"--chapters", `V:\media\ep01\ep01.txt`,
+		"--chapters", filepath.Join(mediaDir, "ep01.txt"),
 		"--track-order", "0:0,1:0,2:0",
 	}
 	assertArgs(t, got, want)

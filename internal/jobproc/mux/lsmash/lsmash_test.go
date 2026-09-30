@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,6 +27,19 @@ const (
 	testAudioEng = `D:\WORKS\work\ep01_eng.ac3`
 	testChapter  = `D:\WORKS\work\ep01.txt`
 )
+
+// volumeRoot is the root the hand-written path cases use: a real drive on
+// Windows; the filesystem root on POSIX, where "V:\..." is an ordinary file
+// name rather than a path. TestBuildArgs keeps its literals because it compares
+// the builder against itself; the tests that pin a command line independently
+// build their paths from this root with filepath.Join so they stay meaningful
+// on both platforms.
+func volumeRoot() string {
+	if runtime.GOOS == "windows" {
+		return `V:\`
+	}
+	return "/"
+}
 
 // audioTrack builds an audio track the way the pipeline does: language and name
 // come from the profile, order defaults to "append at the end".
@@ -172,30 +186,39 @@ func TestBuildArgs(t *testing.T) {
 // TestEpisodeOptionsSelectsAndOrdersTracks spells its paths with resolveLocal,
 // which is NewFileRef().Resolve: the expected argv and the argv under test share
 // the code path, so a regression in FileRef.Resolve leaves that test green. This
-// test carries the paths as literals with real drive letters, so only the builder
-// can change them.
+// test carries the paths as explicit literals, so only the builder can change
+// them. They are built from one volume root so the same command line is
+// meaningful on Windows (a drive) and on POSIX (the filesystem root), where a
+// "V:\..." literal would be a file name rather than a path.
 func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
 	t.Parallel()
 
+	// volume is the root every input and the output live on. The paths are
+	// joined by hand from the parts, not resolved from a FileRef, so this test
+	// stays independent of the code path it guards.
+	volume := volumeRoot()
+	mediaDir := filepath.Join(volume, "media", "ep01")
+	outPath := filepath.Join(volume, "out", "ep01.mp4")
+
 	media := &model.MediaFile{
-		Video: videoTrack(`V:\media\ep01\v.hevc`, 24000, 1001),
+		Video: videoTrack(filepath.Join(mediaDir, "v.hevc"), 24000, 1001),
 		AudioTracks: []*model.AudioTrack{
 			// The unsupported .flac and .wav inputs are dropped, the .aac one
 			// survives, and Info.Order puts it before the slice position of
 			// the dropped entries.
-			audioTrackAt(`V:\media\ep01\a1.flac`, "jpn", "Main", 1),
-			audioTrackAt(`V:\media\ep01\a2.aac`, "eng", "Commentary", 2),
-			audioTrack(`V:\media\ep01\a3.wav`, "jpn", ""),
+			audioTrackAt(filepath.Join(mediaDir, "a1.flac"), "jpn", "Main", 1),
+			audioTrackAt(filepath.Join(mediaDir, "a2.aac"), "eng", "Commentary", 2),
+			audioTrack(filepath.Join(mediaDir, "a3.wav"), "jpn", ""),
 		},
-		Chapter: chapterTrack(`V:\media\ep01\ep01.txt`),
+		Chapter: chapterTrack(filepath.Join(mediaDir, "ep01.txt")),
 	}
-	got := BuildArgs(EpisodeOptions(`C:\tools\l-smash\muxer.exe`, `V:\out\ep01.mp4`, media, 0, rootsLocal))
+	got := BuildArgs(EpisodeOptions(filepath.Join(volume, "tools", "l-smash", "muxer.exe"), outPath, media, 0, rootsLocal))
 	want := []string{
 		"--file-format", "mp4",
-		"-o", `V:\out\ep01.mp4`,
-		"-i", `V:\media\ep01\v.hevc?fps=24000/1001`,
-		"-i", `V:\media\ep01\a2.aac?language=eng,handler=Commentary`,
-		"--chapter", `V:\media\ep01\ep01.txt`,
+		"-o", outPath,
+		"-i", filepath.Join(mediaDir, "v.hevc") + "?fps=24000/1001",
+		"-i", filepath.Join(mediaDir, "a2.aac") + "?language=eng,handler=Commentary",
+		"--chapter", filepath.Join(mediaDir, "ep01.txt"),
 	}
 	assertArgs(t, got, want)
 }

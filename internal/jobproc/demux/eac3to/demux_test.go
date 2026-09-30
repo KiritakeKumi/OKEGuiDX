@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,18 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/proc"
 )
+
+// volumeRoot is the volume the path cases below live on: a real drive on
+// Windows; the filesystem root on POSIX, where "D:\x" is an ordinary file name
+// rather than a path. Every case builds both its inputs and its expectations
+// from it, so one set of cases exercises path handling meaningfully on both
+// platforms instead of pinning a Windows literal as input to filepath.Dir.
+func volumeRoot() string {
+	if runtime.GOOS == "windows" {
+		return `D:\`
+	}
+	return "/"
+}
 
 // --- track enumeration -----------------------------------------------------
 
@@ -374,36 +387,36 @@ func TestOutFileName(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "windows paths",
-			source: `D:\BDMV\STREAM\00001.m2ts`,
-			prefix: `D:\work\00001`,
+			name:   "volume root paths",
+			source: filepath.Join(volumeRoot(), "BDMV", "STREAM", "00001.m2ts"),
+			prefix: filepath.Join(volumeRoot(), "work", "00001"),
 			index:  3,
 			codec:  CodecTrueHDAC3,
-			want:   `D:\work\00001_3.flac`,
+			want:   filepath.Join(volumeRoot(), "work", "00001_3.flac"),
 		},
 		{
 			name:   "the working prefix contributes only its directory",
-			source: `D:\BDMV\STREAM\00001.m2ts`,
-			prefix: `D:\work\00001` + "_part0",
+			source: filepath.Join(volumeRoot(), "BDMV", "STREAM", "00001.m2ts"),
+			prefix: filepath.Join(volumeRoot(), "work", "00001") + "_part0",
 			index:  5,
 			codec:  CodecAC3,
-			want:   `D:\work\00001_5.ac3`,
+			want:   filepath.Join(volumeRoot(), "work", "00001_5.ac3"),
 		},
 		{
 			name:   "source stem is used, not the prefix name",
-			source: `E:\in\FEATURE_1.evo`,
-			prefix: `E:\out\whatever`,
+			source: filepath.Join(volumeRoot(), "in", "FEATURE_1.evo"),
+			prefix: filepath.Join(volumeRoot(), "out", "whatever"),
 			index:  2,
 			codec:  CodecDTSMA,
-			want:   `E:\out\FEATURE_1_2.flac`,
+			want:   filepath.Join(volumeRoot(), "out", "FEATURE_1_2.flac"),
 		},
 		{
 			name:   "two-digit index",
-			source: `D:\in\movie.mkv`,
-			prefix: `D:\work\movie`,
+			source: filepath.Join(volumeRoot(), "in", "movie.mkv"),
+			prefix: filepath.Join(volumeRoot(), "work", "movie"),
 			index:  12,
 			codec:  CodecPGS,
-			want:   `D:\work\movie_12.sup`,
+			want:   filepath.Join(volumeRoot(), "work", "movie_12.sup"),
 		},
 	}
 	for _, tc := range cases {
@@ -629,9 +642,14 @@ func TestPlanExtraction(t *testing.T) {
 		{Codec: CodecChapter, Index: 1, Type: model.TrackTypeChapter},
 	}
 	for _, tr := range tracks {
-		tr.SourceFile = `D:\src\00001.m2ts`
-		tr.WorkingPathPrefix = `D:\work\00001`
+		tr.SourceFile = filepath.Join(volumeRoot(), "src", "00001.m2ts")
+		tr.WorkingPathPrefix = filepath.Join(volumeRoot(), "work", "00001")
 	}
+
+	// workPath names an extracted file in the working directory the prefix
+	// above points at, so the expectations stay on the same volume as the
+	// inputs on every platform.
+	workPath := func(name string) string { return filepath.Join(volumeRoot(), "work", name) }
 
 	cases := []struct {
 		name      string
@@ -649,7 +667,7 @@ func TestPlanExtraction(t *testing.T) {
 				{Info: model.NewInfo()},
 			},
 			subs:      []model.Info{model.NewInfo()},
-			wantArgs:  []string{"3:", `D:\work\00001_3.flac`, "4:", `D:\work\00001_4.flac`, "5:", `D:\work\00001_5.ac3`, "6:", `D:\work\00001_6.eac3`, "7:", `D:\work\00001_7.sup`},
+			wantArgs:  []string{"3:", workPath("00001_3.flac"), "4:", workPath("00001_4.flac"), "5:", workPath("00001_5.ac3"), "6:", workPath("00001_6.eac3"), "7:", workPath("00001_7.sup")},
 			wantCodec: []TrackCodec{CodecTrueHDAC3, CodecDTSMA, CodecAC3, CodecEAC3, CodecPGS},
 		},
 		{
@@ -661,7 +679,7 @@ func TestPlanExtraction(t *testing.T) {
 				{Info: model.NewInfo()},
 			},
 			subs:      []model.Info{model.NewInfo()},
-			wantArgs:  []string{"3:", `D:\work\00001_3.flac`, "5:", `D:\work\00001_5.ac3`, "6:", `D:\work\00001_6.eac3`, "7:", `D:\work\00001_7.sup`},
+			wantArgs:  []string{"3:", workPath("00001_3.flac"), "5:", workPath("00001_5.ac3"), "6:", workPath("00001_6.eac3"), "7:", workPath("00001_7.sup")},
 			wantCodec: []TrackCodec{CodecTrueHDAC3, CodecAC3, CodecEAC3, CodecPGS},
 		},
 		{
@@ -673,14 +691,14 @@ func TestPlanExtraction(t *testing.T) {
 				{Info: model.NewInfo(), Lossy: true},
 			},
 			subs:      []model.Info{model.NewInfo()},
-			wantArgs:  []string{"3:", `D:\work\00001_3.flac`, "4:", `D:\work\00001_4.flac`, "5:", `D:\work\00001_5.flac`, "6:", `D:\work\00001_6.eac3`, "7:", `D:\work\00001_7.sup`},
+			wantArgs:  []string{"3:", workPath("00001_3.flac"), "4:", workPath("00001_4.flac"), "5:", workPath("00001_5.flac"), "6:", workPath("00001_6.eac3"), "7:", workPath("00001_7.sup")},
 			wantCodec: []TrackCodec{CodecFLAC, CodecFLAC, CodecFLAC, CodecEAC3, CodecPGS},
 		},
 		{
 			name:      "vobsub and chapters are never extracted",
 			audio:     []model.AudioInfo{{Info: model.NewInfo()}, {Info: model.NewInfo()}, {Info: model.NewInfo()}, {Info: model.NewInfo()}},
 			subs:      []model.Info{model.NewInfo()},
-			wantArgs:  []string{"3:", `D:\work\00001_3.flac`, "4:", `D:\work\00001_4.flac`, "5:", `D:\work\00001_5.ac3`, "6:", `D:\work\00001_6.eac3`, "7:", `D:\work\00001_7.sup`},
+			wantArgs:  []string{"3:", workPath("00001_3.flac"), "4:", workPath("00001_4.flac"), "5:", workPath("00001_5.ac3"), "6:", workPath("00001_6.eac3"), "7:", workPath("00001_7.sup")},
 			wantCodec: []TrackCodec{CodecTrueHDAC3, CodecDTSMA, CodecAC3, CodecEAC3, CodecPGS},
 		},
 	}
@@ -857,13 +875,25 @@ func TestLogNameIsCRC32(t *testing.T) {
 		t.Fatalf("crc32(\"123456789\") = %08X, want CBF43926", got)
 	}
 	p := New(Options{
-		SourceFile:        `D:\BDMV\STREAM\00001.m2ts`,
-		WorkingPathPrefix: `D:\work\00001`,
+		SourceFile:        filepath.Join(volumeRoot(), "BDMV", "STREAM", "00001.m2ts"),
+		WorkingPathPrefix: filepath.Join(volumeRoot(), "work", "00001"),
 	})
+	// Both sides are built from the same platform-appropriate path, but not by
+	// the same expression: the expectation names the log file directly, the
+	// observed value derives it from the options the way demux.go does. The
+	// point of the test is that the log name is the CRC32 of the log path, so
+	// a literal that only reproduces that path on Windows would test nothing
+	// on Linux.
 	workDir := filepath.Dir(p.opts.WorkingPathPrefix)
 	logPath := filepath.Join(workDir, "00001.eac3to.log")
 	want := fmt.Sprintf("%08X.eac3to.log", crc32.ChecksumIEEE([]byte(logPath)))
-	got := fmt.Sprintf("%08X.eac3to.log", crc32.ChecksumIEEE([]byte(`D:\work\00001.eac3to.log`)))
+
+	sourceStem := strings.TrimSuffix(filepath.Base(p.opts.SourceFile), filepath.Ext(p.opts.SourceFile))
+	gotPath := filepath.Join(filepath.Dir(p.opts.WorkingPathPrefix), sourceStem+".eac3to.log")
+	got := fmt.Sprintf("%08X.eac3to.log", crc32.ChecksumIEEE([]byte(gotPath)))
+	if gotPath != logPath {
+		t.Fatalf("log path = %q, want %q", gotPath, logPath)
+	}
 	if got != want {
 		t.Fatalf("hash = %q, want %q", got, want)
 	}

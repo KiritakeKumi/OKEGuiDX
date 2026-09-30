@@ -245,7 +245,7 @@ func TestPathSuffix(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PathSuffix(%q) error = %v", tc.input, err)
 			}
-			if got != tc.want {
+			if got != normalizeSeparators(tc.want) {
 				t.Errorf("PathSuffix(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 			if tc.crc == 0 {

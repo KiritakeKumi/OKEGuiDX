@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,18 @@ import (
 	"github.com/KiritakeKumi/OKEGuiDX/internal/okerr"
 	"github.com/KiritakeKumi/OKEGuiDX/internal/profile"
 )
+
+// rootDir is the volume root of the working directory: the shallowest rooted
+// path this platform has, "D:\" on Windows and "/" elsewhere. Tests build
+// rooted expectations from it so the same cases run on every platform.
+func rootDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	return filepath.VolumeName(dir) + string(filepath.Separator)
+}
 
 // result captures one run of the command line.
 type result struct {
@@ -599,16 +612,21 @@ func TestOutputRef(t *testing.T) {
 }
 
 func TestResolveFrom(t *testing.T) {
+	// The expectations are built from a platform-appropriate rooted directory
+	// rather than a Windows literal, so one set of cases asserts the same rule
+	// on every platform: a relative entry joins the directory, and an absolute
+	// one is left alone.
+	dir := filepath.Join(rootDir(t), "work")
 	tests := []struct {
 		name string
 		dir  string
 		rel  string
 		want string
 	}{
-		{name: "relative path joins the directory", dir: `D:\work`, rel: `in.m2ts`, want: `D:\work\in.m2ts`},
-		{name: "nested relative path", dir: `D:\work`, rel: `a\b.vpy`, want: `D:\work\a\b.vpy`},
-		{name: "absolute path is kept", dir: `D:\work`, rel: `E:\media\in.m2ts`, want: `E:\media\in.m2ts`},
-		{name: "empty stays empty", dir: `D:\work`, rel: ``, want: ``},
+		{name: "relative path joins the directory", dir: dir, rel: `in.m2ts`, want: filepath.Join(dir, "in.m2ts")},
+		{name: "nested relative path", dir: dir, rel: `a\b.vpy`, want: filepath.Join(dir, "a", "b.vpy")},
+		{name: "absolute path is kept", dir: dir, rel: filepath.Join(rootDir(t), "media", "in.m2ts"), want: filepath.Join(rootDir(t), "media", "in.m2ts")},
+		{name: "empty stays empty", dir: dir, rel: ``, want: ``},
 	}
 
 	for _, tc := range tests {

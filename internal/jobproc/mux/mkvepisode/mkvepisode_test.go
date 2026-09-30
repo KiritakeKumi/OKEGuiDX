@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +27,19 @@ var (
 )
 
 const mkvmergePath = `C:\tools\mkvtoolnix\mkvmerge.exe`
+
+// volumeRoot is the root the hand-written path cases use: a real drive on
+// Windows; the filesystem root on POSIX, where "D:\..." is an ordinary file
+// name rather than a path. TestArgs keeps its literals because it compares the
+// builder against itself (through localPath); the test that pins a command line
+// independently builds its paths from this root with filepath.Join so it stays
+// meaningful on both platforms.
+func volumeRoot() string {
+	if runtime.GOOS == "windows" {
+		return `D:\`
+	}
+	return "/"
+}
 
 // The cases resolve their FileRefs on an empty root, which is standalone mode
 // on Windows (see mkvmerge_test.go for the same convention).
@@ -261,35 +276,44 @@ func TestArgs(t *testing.T) {
 // parentheses with its per-track options, audio and subtitle files get the
 // --no-track-tags --no-global-tags pair, and --track-order closes the line. A
 // change to mkvmerge.BuildArgs that TestArgs would follow silently fails here.
+//
+// The paths are joined by hand from one volume root rather than resolved from a
+// FileRef, so this test stays independent of the code path it guards while
+// remaining a real path on both Windows and POSIX.
 func TestEpisodeArgsAreIndependentOfTheBuilder(t *testing.T) {
 	t.Parallel()
+	volume := volumeRoot()
+	workDir := filepath.Join(volume, "work")
+	outDir := filepath.Join(volume, "out")
+	outPath := filepath.Join(outDir, "00001.m2ts.mkv")
+
 	media := &model.MediaFile{
-		Video: videoTrack(`D:\work\ep01_all.mkv`, `D:\work\ep01.v2.tcfile`),
+		Video: videoTrack(filepath.Join(workDir, "ep01_all.mkv"), filepath.Join(workDir, "ep01.v2.tcfile")),
 		AudioTracks: []*model.AudioTrack{
-			audioTrack(`D:\work\ep01.flac`, model.MuxOptionDefault, "jpn", "Main"),
+			audioTrack(filepath.Join(workDir, "ep01.flac"), model.MuxOptionDefault, "jpn", "Main"),
 		},
-		Chapter: chapterTrack(`D:\work\ep01.txt`, "jpn"),
+		Chapter: chapterTrack(filepath.Join(workDir, "ep01.txt"), "jpn"),
 	}
 	p := New(Options{
 		Mkvmerge: mkvmergePath,
-		Output:   `D:\out\00001.m2ts.mkv`,
+		Output:   outPath,
 		Media:    media,
 	})
 	want := []string{
 		"--ui-language", "en",
-		"--output", `D:\out\00001.m2ts.mkv`,
-		"--timestamps", `0:D:\work\ep01.v2.tcfile`,
+		"--output", outPath,
+		"--timestamps", "0:" + filepath.Join(workDir, "ep01.v2.tcfile"),
 		"--default-track", "0:1",
 		"--language", "0:und",
 		"--track-name", "0:",
-		"(", `D:\work\ep01_all.mkv`, ")",
+		"(", filepath.Join(workDir, "ep01_all.mkv"), ")",
 		"--no-track-tags", "--no-global-tags",
 		"--default-track", "0:1",
 		"--language", "0:jpn",
 		"--track-name", "0:Main",
-		"(", `D:\work\ep01.flac`, ")",
+		"(", filepath.Join(workDir, "ep01.flac"), ")",
 		"--chapter-language", "jpn",
-		"--chapters", `D:\work\ep01.txt`,
+		"--chapters", filepath.Join(workDir, "ep01.txt"),
 		"--track-order", "0:0,1:0",
 	}
 	assertArgs(t, p.Args(), want)
