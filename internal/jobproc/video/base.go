@@ -26,7 +26,7 @@ import (
 type EncodeSpec struct {
 	// VSPipe is the absolute path to vspipe.
 	VSPipe string
-	// VSPipeArgs are the arguments passed to vspipe, excluding --y4m and the
+	// VSPipeArgs are the arguments passed to vspipe, excluding the y4m flag and the
 	// script path, which the base class adds.
 	VSPipeArgs []string
 	// Script is the .vpy path.
@@ -111,7 +111,7 @@ func (b *Base) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 
 	producer, err := proc.Start(proc.Spec{
 		Path:     b.spec.VSPipe,
-		Args:     b.vspipeArgs(),
+		Args:     b.vspipeArgs(ctx),
 		Priority: b.spec.Priority,
 		Name:     "vspipe",
 	})
@@ -319,8 +319,8 @@ func (b *Base) Fail(err error) {
 	b.update(jobproc.Progress{Status: e.Summary})
 }
 
-func (b *Base) vspipeArgs() []string {
-	args := []string{"--y4m"}
+func (b *Base) vspipeArgs(ctx context.Context) []string {
+	args := y4mArgs(ctx, b.spec.VSPipe)
 	if b.spec.FrameStart > 0 || b.spec.FrameEnd >= 0 {
 		if b.spec.FrameStart > 0 {
 			args = append(args, "-s", strconv.FormatInt(b.spec.FrameStart, 10))
