@@ -181,7 +181,11 @@ func (b *Base) Run(ctx context.Context, sink jobproc.ProgressSink) error {
 		return okerr.Wrap(ctx.Err(), okerr.KindCanceled, "任务已取消", "%s 已被终止", b.name)
 	}
 	if perr != nil && !isCanceledProcessErr(perr) {
-		return okerr.Wrap(perr, okerr.KindTool, okerr.ErrVpy.Summary, "vspipe 异常退出")
+		// Without the exit code and output the user is left with "vspipe 异常退出"
+		// and no cause.
+		return okerr.Wrap(perr, okerr.KindTool, okerr.ErrVpy.Summary, "vspipe 异常退出").
+			WithTool("vspipe", producer.ExitCode()).
+			WithOutput(producer.RecentOutput())
 	}
 	if encoderErr != nil {
 		return b.wrapEncoderFailure(encoderErr)
