@@ -1,4 +1,4 @@
-name: Windows candidate
+name: Candidate packages
 on:
   workflow_dispatch:
     inputs:
@@ -13,8 +13,10 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-24.04
-    outputs:
-      artifact: ${{ steps.name.outputs.artifact }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [win-x64, win-arm64, linux-x64, linux-arm64, linux-riscv64]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -44,38 +46,88 @@ jobs:
           github-token: ${{ github.token }}
           repository: KiritakeKumi/OKEGuiDX-tools
           run-id: ${{ inputs.tools_run_id }}
-          pattern: '*-win-x64'
+          pattern: '*-${{ matrix.target }}'
           merge-multiple: true
           path: artifacts/tools-input
-      - name: Build candidate
+      - name: Install chapter compiler
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
-          python3 packaging/windows-candidate.py --tools-dir artifacts/tools-input/win-x64/tools --tools-source artifacts/tooling --run-metadata "$RUNNER_TEMP/tools-run.json" --output artifacts/candidate
+          set -euo pipefail
+          case "$TARGET" in
+            win-x64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 ;;
+            linux-arm64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu ;;
+            linux-riscv64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu ;;
+            win-arm64)
+              asset=llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz
+              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/$asset"
+              mkdir "$RUNNER_TEMP/llvm-mingw"
+              tar -xJf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP/llvm-mingw" --strip-components=1
+              echo "$RUNNER_TEMP/llvm-mingw/bin" >> "$GITHUB_PATH"
+              ;;
+          esac
+      - name: Build candidate
+        env:
+          TARGET: ${{ matrix.target }}
+        run: python3 packaging/build_candidate.py --target "$TARGET" --tools-dir "artifacts/tools-input/$TARGET/tools" --tools-source artifacts/tooling --run-metadata "$RUNNER_TEMP/tools-run.json" --output artifacts/candidate
       - id: name
-        run: echo "artifact=OKEGuiDX-win-x64-candidate-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+        env:
+          TARGET: ${{ matrix.target }}
+        run: echo "artifact=OKEGuiDX-$TARGET-candidate-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.name.outputs.artifact }}
           path: |
             artifacts/candidate/*.zip
+            artifacts/candidate/*.tar.gz
             artifacts/candidate/*.sha256
           if-no-files-found: error
   verify:
     needs: package
-    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-2025
+          - target: win-arm64
+            runner: windows-11-arm
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: linux-riscv64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - uses: docker/setup-qemu-action@v4
+        if: matrix.target == 'linux-riscv64'
+        with:
+          platforms: riscv64
+      - id: name
+        env:
+          TARGET: ${{ matrix.target }}
+        run: echo "artifact=OKEGuiDX-$TARGET-candidate-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.package.outputs.artifact }}
+          name: ${{ steps.name.outputs.artifact }}
           path: artifacts/verify
-      - name: Verify extracted candidate on Windows
-        shell: pwsh
+      - name: Verify extracted candidate
         run: |
-          $archive = (Get-ChildItem artifacts/verify/*.zip).FullName
-          python packaging/verify-windows-candidate.py $archive
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, 'packaging')
+          from verify_candidate import verify
+          archives = [p for p in Path('artifacts/verify').iterdir() if p.name.endswith(('.zip', '.tar.gz'))]
+          assert len(archives) == 1
+          verify(archives[0])
+          PY
