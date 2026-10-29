@@ -53,7 +53,7 @@ static tc_status parse_buffer(const tc_buf *b, tc_data **out) {
     if (!f) {
         return TC_E_IO;
     }
-    size_t n = fwrite(b->data, 1, b->len, f);
+    size_t n = b->len ? fwrite(b->data, 1, b->len, f) : 0;
     fclose(f);
     if (n != b->len) {
         return TC_E_IO;
