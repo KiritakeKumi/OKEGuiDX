@@ -1,0 +1,81 @@
+name: Windows candidate
+on:
+  workflow_dispatch:
+    inputs:
+      tools_run_id:
+        description: Successful OKEGuiDX-tools build run
+        required: true
+        default: '40921204564'
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact: ${{ steps.name.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - name: Resolve successful tools build
+        id: tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOLS_RUN_ID: ${{ inputs.tools_run_id }}
+        run: |
+          gh api "repos/KiritakeKumi/OKEGuiDX-tools/actions/runs/$TOOLS_RUN_ID" > "$RUNNER_TEMP/tools-run.json"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          r = json.load(open(os.environ['RUNNER_TEMP'] + '/tools-run.json'))
+          assert r['conclusion'] == 'success' and r['status'] == 'completed'
+          assert r['path'] == '.github/workflows/build.yml'
+          print('sha=' + r['head_sha'])
+          PY
+      - uses: actions/checkout@v5
+        with:
+          repository: KiritakeKumi/OKEGuiDX-tools
+          ref: ${{ steps.tools.outputs.sha }}
+          path: artifacts/tooling
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          repository: KiritakeKumi/OKEGuiDX-tools
+          run-id: ${{ inputs.tools_run_id }}
+          pattern: '*-win-x64'
+          merge-multiple: true
+          path: artifacts/tools-input
+      - name: Build candidate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          python3 packaging/windows-candidate.py --tools-dir artifacts/tools-input/win-x64/tools --tools-source artifacts/tooling --run-metadata "$RUNNER_TEMP/tools-run.json" --output artifacts/candidate
+      - id: name
+        run: echo "artifact=OKEGuiDX-win-x64-candidate-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact }}
+          path: |
+            artifacts/candidate/*.zip
+            artifacts/candidate/*.sha256
+          if-no-files-found: error
+  verify:
+    needs: package
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.artifact }}
+          path: artifacts/verify
+      - name: Verify extracted candidate on Windows
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem artifacts/verify/*.zip).FullName
+          python packaging/verify-windows-candidate.py $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
