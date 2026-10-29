@@ -1,3 +1,7 @@
+# Legacy Windows installer
+
+These NSIS instructions describe the archived .NET/WPF application. The current Go application is built from cmd/okegui; its release packaging is not implemented yet. See the repository README for current build and run instructions.
+
 PACKAGERS:
 
 You will need NSIS and upx to make the installer. You need a unicode version of NSIS.

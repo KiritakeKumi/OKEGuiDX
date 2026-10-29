@@ -1,29 +1,62 @@
-# [OKEGui](https://github.com/vcb-s/OKEGui/) &middot; [![GitHub license](https://img.shields.io/badge/license-GPLv2-blue.svg)](https://github.com/vcb-s/OKEGui/blob/master/LICENSE) [![Build status](https://ci.appveyor.com/api/projects/status/p4p7upa6hmsgu599?svg=true&passingText=%E7%BC%96%E8%AF%91%20-%20%E7%A8%B3%20&pendingText=%E5%B0%8F%E5%9C%9F%E8%B1%86%E7%82%B8%E4%BA%86%20&failingText=%E6%88%91%E6%84%9F%E8%A7%89%E5%8D%9C%E8%A1%8C%20)](https://ci.appveyor.com/project/vcb-s/okegui)
+# OKEGuiDX
 
+OKEGuiDX 将 OKEGui 的任务引擎移植为 Go，提供命令行、常驻服务和内嵌 Web UI。当前主分支使用 Go；旧 .NET/WPF 代码保留为行为参考，冻结版本见 legacy/net472。
 
-![alt text](okegui_600x400.jpg)
+## 当前进度（2026-10-04）
 
-## 安装与使用
+[最新 Go CI](https://github.com/KiritakeKumi/OKEGuiDX/actions/runs/36912486741) 在 75bbfa9 上通过：Go 测试（含 race 检查）、lint、五目标编译、libtchapter 三架构构建与真实章节工具测试。
 
-1. OKEGui 需要 .NET 4.5。Windows 8/Windows Server 2012 及以上自带；Windows 7 和 Windows Server 2008 需要自行安装: https://www.microsoft.com/zh-cn/download/details.aspx?id=30653 。
+目标平台为 Windows x64/arm64 和 Linux x64/arm64/riscv64。已有 riscv64 实机 Go 测试与编码器测速；完整成品回归、旧版黄金基准对拍和 Go 版自动发布仍未完成。当前从源码构建，旧版 Release 的 OKEGui.exe / NSIS 安装器不代表 Go 版交付。
 
-2. OKEGui 自带的 qaac 工具依赖 Apple Quicktime，请确保正确安装了 64bit iTunes 组件或者 [AppleApplicationSupport](https://github.com/vcb-s/OKEGui/releases/download/4.0/AppleApplicationSupport64.msi)。  
-    从 8.7.1 版本开始，OKEGui Release 将自带 qaac 相关依赖，无需额外安装。
+## 构建与运行
 
-3. 下载最新 Release 的 zip 压缩包，解压到一个纯英文目录下。双击其中 OKEGui.exe，如果能正确运行显示出窗口，即安装成功。
+需要 Go 1.25 或更高版本。在仓库根目录运行：
 
-4. OKEGui 依赖于视频处理框架 VapourSynth，本仓库的 Release 不包含 VapourSynth，推荐使用我们打包好的 [OKEGui portable 整合包](https://github.com/AmusementClub/tools/releases)。
+~~~sh
+go build -o okegui ./cmd/okegui
+./okegui --help
+./okegui gui
+~~~
 
-5. OKEGui 的使用方法可参考 [Wiki](https://github.com/vcb-s/OKEGui/wiki) 和 VCB-Studio 公开教程 [第十一章](https://guides.vcb-s.com/basic-guide-11)。
+Windows 使用 go build -o okegui.exe ./cmd/okegui，随后运行 .\okegui.exe gui。gui 启动服务并打开默认浏览器，默认地址为 http://127.0.0.1:8090/。
 
-## 代码中相关概念解释:
+其他入口：
 
-Task: 从单个源（例如 m2ts）到成品（例如 mkv）的整个过程。Task 会在主程序界面的列表里显示。
+~~~sh
+./okegui daemon
+./okegui status
+./okegui run --dry-run profile.json
+./okegui run profile.json
+~~~
 
-Job: 每个 Task 会被分解成不同的 Job，并依次执行。例如抽流，压制，封装等。Job 是可以独立运行的最低单位。
+各命令参数见 okegui <命令> --help。当前仅支持 standalone；coordinator/worker 网络调度尚未实现。
 
-JobProcessror: 负责执行每个 Job 的命令行 Warpper。比如 X265Encoder 调用 x265 压制 HEVC，FFMpegVolumeChecker 调用 ffmpeg 检查音轨音量。
+## 外部工具
 
-Model: 储存媒体文件相关的信息。Info 只带例如语言、封装选项等信息，Track 则是 File+Info 的组合，MediaFile 则是多条 Track 的合集。
+主程序无需 .NET；编码、抽流、封装依赖外部工具。构建与版本见 [OKEGuiDX-tools](https://github.com/KiritakeKumi/OKEGuiDX-tools)。五目标工具构建与自检尚未全部通过，主程序交叉编译成功不能等同完整工具链可用。
 
-Worker: 每一个 Task 只会在一个 Worker 里进行，因此有几个 Worker 就允许几个 Task 同时进行。多开相关的选项。每个 Task 具体的实现流程由 Worker 负责执行。
+将工具按 tools/x26x、tools/ffmpeg、tools/mkvtoolnix 等目录放在主程序旁边。--tools 参数接收包含 tools/ 的父目录：
+
+~~~sh
+./okegui status --tools /path/to/install
+~~~
+
+VapourSynth/vspipe、Python 与用户脚本插件单独准备，tools 构建不包含它们。libtchapter 默认以独立 tchapter CLI 调用；C 编译环境下可运行 make -C native/tchapter cli，将产物按 tools/tchapter/tchapter（Windows 加 .exe）布局安装。
+
+Windows x64 的 x265 优先 Kyouko，其次 Asuna、upstream；其他平台使用 upstream（当前锁定 4.2）。不同变体不能直接以 md5 判断跨平台一致性。AAC 编码依赖 Windows qaac；非 Windows 会明确拒绝 AAC 编码。
+
+## 代码结构
+
+- cmd/okegui：CLI、daemon、浏览器界面入口。
+- internal/engine：队列、Worker 与任务管线。
+- internal/jobproc：编码、音频、抽流与封装工具包装。
+- internal/api：REST /api/v1 与 WebSocket。
+- web：嵌入主程序的 Web UI。
+- native/tchapter：C 章节库与 CLI。
+- OKEGui、TChapter、dist/windows：旧版代码与打包参考。
+
+Task 是单个源到成品的完整任务；Job 是抽流、压制或封装阶段；Worker 决定同时执行的任务数。
+
+## 旧版资料
+
+原 OKEGui 的说明见 [Wiki](https://github.com/vcb-s/OKEGui/wiki) 和 [VCB-Studio 教程](https://guides.vcb-s.com/basic-guide-11)。这些资料描述旧版工作流；当前入口与参数以命令帮助为准。
