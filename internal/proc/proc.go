@@ -528,7 +528,8 @@ func Run(ctx context.Context, spec Spec) (*RunResult, error) {
 	go func() { consumeDone <- p.Consume(onOut, onErr) }()
 
 	waitErr := p.WaitWithContext(ctx)
-	<-consumeDone
+	// Wait for capture to finish; Run reports the process exit status.
+	_ = <-consumeDone
 
 	res := &RunResult{
 		ExitCode:   p.ExitCode(),

@@ -136,6 +136,13 @@ jobs:
             make static shared CC=${{ matrix.cc }}
           fi
 
+      - name: Diagnose native test failures with sanitizers
+        if: failure() && matrix.cc == 'gcc'
+        working-directory: native/tchapter
+        run: |
+          make clean
+          make test CFLAGS="-O1 -g -fPIC -fsanitize=address,undefined -fno-omit-frame-pointer"
+
       - uses: actions/upload-artifact@v4
         with:
           name: libtchapter-${{ matrix.target }}
