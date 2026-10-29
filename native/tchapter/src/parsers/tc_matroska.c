@@ -320,9 +320,10 @@ tc_status tc_matroska_parse_mem(const void *buf, size_t len, const char *hint, t
     }
     const char *xmlns = tc_xml_attr(chapters, "xmlns");
     if (xmlns && xmlns[0] != '\0') {
-        tc_xml_free(root);
-        return tc_fail(TC_E_FORMAT,
+        st = tc_fail(TC_E_FORMAT,
                        "matroska: <Chapters> must not be in a namespace (found \"%s\")", xmlns);
+        tc_xml_free(root);
+        return st;
     }
 
     for (size_t i = 0; i < chapters->child_count; i++) {

@@ -137,6 +137,8 @@ jobs:
           fi
 
       - name: Test native library with sanitizers
+        env:
+          UBSAN_OPTIONS: halt_on_error=1
         if: matrix.cc == 'gcc'
         working-directory: native/tchapter
         run: |

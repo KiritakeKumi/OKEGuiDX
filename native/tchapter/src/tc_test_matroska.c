@@ -535,6 +535,15 @@ static void test_malformed_xml_is_rejected(void) {
     }
 }
 
+static void test_namespace_error_keeps_value(void) {
+    tc_data *d = NULL;
+    const char *text = "<Chapters xmlns=\"urn:chapter-regression\"><EditionEntry/></Chapters>";
+    TC_CHECK_EQ_INT(parse_text(text, &d), TC_E_FORMAT);
+    TC_CHECK(d == NULL);
+    TC_CHECK_CONTAINS(tc_last_error(), "urn:chapter-regression");
+    tc_free(d);
+}
+
 static void test_wrong_root_is_rejected(void) {
     const char *cases[] = {
         "<XPL><title name=\"x\"/></XPL>",
@@ -650,6 +659,7 @@ TC_SUITE(matroska) {
     TC_CASE("comments");           test_comments_and_declaration();
     TC_CASE("nested_atoms");       test_deeply_nested_atoms();
     TC_CASE("malformed");          test_malformed_xml_is_rejected();
+    TC_CASE("namespace_error");    test_namespace_error_keeps_value();
     TC_CASE("wrong_root");         test_wrong_root_is_rejected();
     TC_CASE("bad_arguments");      test_bad_arguments();
     TC_CASE("parse_file");         test_parse_file_matches_memory();

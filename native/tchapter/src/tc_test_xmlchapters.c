@@ -505,6 +505,15 @@ static void test_malformed_xml_is_rejected(void) {
 /* The serialiser is case-sensitive, does not accept a namespaced root, and
  * binds the document element itself: a wrapper around <Chapters> is a different
  * document. */
+static void test_namespace_error_keeps_value(void) {
+    tc_data *d = NULL;
+    const char *text = "<Chapters xmlns=\"urn:chapter-regression\"><EditionEntry/></Chapters>";
+    TC_CHECK_EQ_INT(parse_text(text, &d), TC_E_FORMAT);
+    TC_CHECK(d == NULL);
+    TC_CHECK_CONTAINS(tc_last_error(), "urn:chapter-regression");
+    tc_free(d);
+}
+
 static void test_wrong_root_is_rejected(void) {
     const char *cases[] = {
         "<XPL><title name=\"x\"/></XPL>",
@@ -609,6 +618,7 @@ TC_SUITE(xmlchapters) {
     TC_CASE("nested_atoms");       test_deeply_nested_atoms();
     TC_CASE("unknown_elements");   test_unknown_elements_are_ignored();
     TC_CASE("malformed");          test_malformed_xml_is_rejected();
+    TC_CASE("namespace_error");    test_namespace_error_keeps_value();
     TC_CASE("wrong_root");         test_wrong_root_is_rejected();
     TC_CASE("unused_xmlns");       test_unused_namespace_declaration();
     TC_CASE("trailing_content");   test_trailing_content_after_root();
