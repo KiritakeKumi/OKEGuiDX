@@ -56,8 +56,8 @@ jobs:
           set -euo pipefail
           case "$TARGET" in
             win-x64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 ;;
-            linux-arm64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu ;;
-            linux-riscv64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu ;;
+            linux-arm64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross ;;
+            linux-riscv64) sudo apt-get update; sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu libc6-dev-riscv64-cross ;;
             win-arm64)
               asset=llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz
               curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/$asset"
