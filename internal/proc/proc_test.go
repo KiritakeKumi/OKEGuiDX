@@ -1,6 +1,7 @@
 package proc
 
 import (
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -158,5 +159,21 @@ func TestWrapKeepsUnwrapChain(t *testing.T) {
 	err := errors.New("boom")
 	if !errors.Is(wrapForTest(err), err) {
 		t.Fatal("wrapped error does not unwrap to its cause")
+	}
+}
+
+func TestRunReportsOutputCaptureFailure(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	res, err := Run(ctx, helperSpec("long-line", "long-line"))
+	if err == nil {
+		t.Fatal("Run() silently accepted output exceeding the scanner limit")
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Run() did not finish capturing output: %v", ctx.Err())
+	}
+	if res == nil || res.ExitCode != 0 {
+		t.Fatalf("Run() result = %+v, want successful process with capture error", res)
 	}
 }

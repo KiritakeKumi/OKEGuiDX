@@ -341,6 +341,22 @@ static void test_xml_rejects_malformed(void) {
     }
 }
 
+/* Error formatting must happen before the element name is freed. */
+static void test_xml_error_keeps_element_name(void) {
+    const char *bad[] = {"<chapter>", "<chapter></wrong>", "<chapter></chapter"};
+    const char *messages[] = {
+        "xml: unterminated element <chapter>",
+        "xml: mismatched closing tag for <chapter>",
+        "xml: malformed closing tag for <chapter>",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        tc_xml_node *root = NULL;
+        TC_CHECK_EQ_INT(tc_xml_parse(bad[i], strlen(bad[i]), &root), TC_E_FORMAT);
+        TC_CHECK(root == NULL);
+        TC_CHECK_EQ_STR(tc_last_error(), messages[i]);
+    }
+}
+
 static void test_xml_empty_is_rejected(void) {
     tc_xml_node *root = NULL;
     TC_CHECK(tc_xml_parse("", 0, &root) != TC_OK);
@@ -677,6 +693,7 @@ TC_SUITE(core) {
     TC_CASE("xml_oddities");          test_xml_comments_cdata_and_doctype();
     TC_CASE("xml_bom");               test_xml_utf8_bom();
     TC_CASE("xml_malformed");         test_xml_rejects_malformed();
+    TC_CASE("xml_error_name");        test_xml_error_keeps_element_name();
     TC_CASE("xml_empty");             test_xml_empty_is_rejected();
     TC_CASE("format_detection");      test_format_detection();
     TC_CASE("api_arguments");         test_api_rejects_bad_arguments();

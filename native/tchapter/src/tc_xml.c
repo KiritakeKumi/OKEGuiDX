@@ -416,8 +416,9 @@ static tc_status xml_parse_element(xml_parser *x, tc_xml_node *parent) {
      * are handled by recursion, so no depth counter is needed here. */
     for (;;) {
         if (x->p >= x->end) {
+            st = tc_fail(TC_E_FORMAT, "xml: unterminated element <%s>", node->name);
             tc_xml_free(node);
-            return tc_fail(TC_E_FORMAT, "xml: unterminated element <%s>", node->name);
+            return st;
         }
         if (*x->p == '<') {
             if (x->p + 1 < x->end && x->p[1] == '/') {
@@ -430,13 +431,15 @@ static tc_status xml_parse_element(xml_parser *x, tc_xml_node *parent) {
                 int match = strcmp(close, node->name) == 0;
                 free(close);
                 if (!match) {
+                    st = tc_fail(TC_E_FORMAT, "xml: mismatched closing tag for <%s>", node->name);
                     tc_xml_free(node);
-                    return tc_fail(TC_E_FORMAT, "xml: mismatched closing tag for <%s>", node->name);
+                    return st;
                 }
                 xml_skip_space(x);
                 if (x->p >= x->end || *x->p != '>') {
+                    st = tc_fail(TC_E_FORMAT, "xml: malformed closing tag for <%s>", node->name);
                     tc_xml_free(node);
-                    return tc_fail(TC_E_FORMAT, "xml: malformed closing tag for <%s>", node->name);
+                    return st;
                 }
                 x->p++;
                 break;

@@ -528,8 +528,7 @@ func Run(ctx context.Context, spec Spec) (*RunResult, error) {
 	go func() { consumeDone <- p.Consume(onOut, onErr) }()
 
 	waitErr := p.WaitWithContext(ctx)
-	// Wait for capture to finish; Run reports the process exit status.
-	_ = <-consumeDone
+	consumeErr := <-consumeDone
 
 	res := &RunResult{
 		ExitCode:   p.ExitCode(),
@@ -540,6 +539,12 @@ func Run(ctx context.Context, spec Spec) (*RunResult, error) {
 	if waitErr != nil {
 		return res, okerr.Wrap(waitErr, okerr.KindTool, "外部工具执行失败",
 			"%s 退出代码 %d", p.Name(), res.ExitCode).
+			WithTool(p.Name(), res.ExitCode).
+			WithOutput(res.LastOutput)
+	}
+	if consumeErr != nil {
+		return res, okerr.Wrap(consumeErr, okerr.KindIO, "读取外部工具输出失败",
+			"读取 %s 输出失败", p.Name()).
 			WithTool(p.Name(), res.ExitCode).
 			WithOutput(res.LastOutput)
 	}

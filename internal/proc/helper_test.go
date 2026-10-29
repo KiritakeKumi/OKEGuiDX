@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +58,9 @@ func TestHelperProcess(t *testing.T) {
 				break
 			}
 		}
+		os.Exit(0)
+	case "long-line":
+		fmt.Print(strings.Repeat("x", 1<<20))
 		os.Exit(0)
 	case helperExit:
 		code := 0
